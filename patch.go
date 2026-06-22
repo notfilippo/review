@@ -20,22 +20,22 @@ type PatchFile struct {
 }
 
 func (file PatchFile) displayPath() string {
-	if file.Path != "" {
-		return file.Path
-	}
-	return file.PrevPath
+	return coalesce(file.Path, file.PrevPath)
 }
 
 func (file PatchFile) contextPaths() (string, string) {
-	oldPath := file.PrevPath
-	if oldPath == "" {
-		oldPath = file.Path
-	}
-	newPath := file.Path
-	if newPath == "" {
-		newPath = oldPath
-	}
+	oldPath := coalesce(file.PrevPath, file.Path)
+	newPath := coalesce(file.Path, oldPath)
 	return oldPath, newPath
+}
+
+func coalesce(values ...string) string {
+	for _, value := range values {
+		if value != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func parsePatchFiles(patch string) []PatchFile {
@@ -222,19 +222,30 @@ func dedupePatchFiles(files []PatchFile) []PatchFile {
 	return out
 }
 
-func mapFilePatches(patch string) map[string]string {
+// parsePatch parses the git patch in a single pass, returning the deduped file
+// list and a map from each path to the raw per-file patch chunk it belongs to.
+func parsePatch(patch string) ([]PatchFile, map[string]string) {
+	chunks := splitGitFilePatches(patch)
+	if len(chunks) == 0 {
+		// No "diff --git" headers (plain unified diff); the per-file chunk map is
+		// meaningless, so fall back to a whole-patch parse for the file list.
+		return parsePatchFiles(patch), nil
+	}
+
+	files := make([]PatchFile, 0, len(chunks))
 	filePatches := make(map[string]string)
-	for _, filePatch := range splitGitFilePatches(patch) {
-		for _, file := range parsePatchFiles(filePatch) {
+	for _, chunk := range chunks {
+		for _, file := range parsePatchFiles(chunk) {
+			files = append(files, file)
 			if file.Path != "" {
-				filePatches[file.Path] = filePatch
+				filePatches[file.Path] = chunk
 			}
 			if file.PrevPath != "" {
-				filePatches[file.PrevPath] = filePatch
+				filePatches[file.PrevPath] = chunk
 			}
 		}
 	}
-	return filePatches
+	return dedupePatchFiles(files), filePatches
 }
 
 func splitGitFilePatches(patch string) []string {

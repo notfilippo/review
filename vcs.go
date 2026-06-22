@@ -48,12 +48,16 @@ func loadVCSReviewInput(options cliOptions) (reviewInput, error) {
 	if err != nil {
 		return reviewInput{}, err
 	}
-	source.fromRev, source.toRev, source.supportsFileContext, err = source.resolveFileContextRevisions(options)
+
+	program, plan, err := source.diffPlan(options)
 	if err != nil {
 		return reviewInput{}, err
 	}
+	source.fromRev = plan.contextFrom
+	source.toRev = plan.contextTo
+	source.supportsFileContext = plan.supportsFileContext
 
-	patch, err := source.diff(options)
+	patch, err := runCommand(program, appendPathFilters(plan.args, options.paths)...)
 	if err != nil {
 		return reviewInput{}, err
 	}
@@ -94,35 +98,60 @@ func findRepoRoot(dir, marker string) (string, bool) {
 	}
 }
 
-func (source *vcsSource) diff(options cliOptions) (string, error) {
+// diffPlan is the resolved diff invocation: the command args plus the revision
+// pair used to load full-file context. Building both together from one switch
+// keeps the diff and file-context views from drifting apart and resolves the
+// git base revision at most once.
+type diffPlan struct {
+	args                []string
+	contextFrom         string
+	contextTo           string
+	supportsFileContext bool
+}
+
+func (source *vcsSource) diffPlan(options cliOptions) (string, diffPlan, error) {
 	switch source.kind {
 	case vcsJJ:
-		return source.jjDiff(options)
+		return "jj", source.jjDiffPlan(options), nil
 	case vcsGit:
-		return source.gitDiff(options)
+		plan, err := source.gitDiffPlan(options)
+		return "git", plan, err
 	default:
-		return "", errors.New("unsupported VCS")
+		return "", diffPlan{}, errors.New("unsupported VCS")
 	}
 }
 
-func (source *vcsSource) jjDiff(options cliOptions) (string, error) {
+func (source *vcsSource) jjDiffPlan(options cliOptions) diffPlan {
 	args := []string{"--no-pager", "--color=never", "-R", source.root, "diff", "--git"}
-	if options.fromRev != "" || options.toRev != "" {
+	switch {
+	case options.fromRev != "" || options.toRev != "":
 		if options.fromRev != "" {
 			args = append(args, "--from", options.fromRev)
 		}
 		if options.toRev != "" {
 			args = append(args, "--to", options.toRev)
 		}
-	} else {
+		return diffPlan{
+			args:                args,
+			contextFrom:         coalesce(options.fromRev, "@"),
+			contextTo:           coalesce(options.toRev, "@"),
+			supportsFileContext: true,
+		}
+	case len(options.revisions) == 0:
+		return diffPlan{args: args, contextFrom: "@-", contextTo: "@", supportsFileContext: true}
+	default:
 		for _, revision := range options.revisions {
 			args = append(args, "-r", revision)
 		}
+		if len(options.revisions) == 1 && isSimpleJJRevision(options.revisions[0]) {
+			revision := options.revisions[0]
+			return diffPlan{args: args, contextFrom: revision + "-", contextTo: revision, supportsFileContext: true}
+		}
+		return diffPlan{args: args}
 	}
-	return runCommand("jj", appendPathFilters(args, options.paths)...)
 }
 
-func (source *vcsSource) gitDiff(options cliOptions) (string, error) {
+func (source *vcsSource) gitDiffPlan(options cliOptions) (diffPlan, error) {
 	args := []string{
 		"-C", source.root,
 		"diff",
@@ -134,20 +163,25 @@ func (source *vcsSource) gitDiff(options cliOptions) (string, error) {
 	switch {
 	case options.fromRev != "" && options.toRev != "":
 		args = append(args, options.fromRev, options.toRev)
+		return diffPlan{args: args, contextFrom: options.fromRev, contextTo: options.toRev, supportsFileContext: true}, nil
 	case options.fromRev != "":
 		args = append(args, options.fromRev)
+		return diffPlan{args: args}, nil
 	case options.toRev != "":
 		args = append(args, "HEAD", options.toRev)
+		return diffPlan{args: args, contextFrom: "HEAD", contextTo: options.toRev, supportsFileContext: true}, nil
 	case len(options.revisions) == 1:
 		baseRevision, err := source.gitCommitBaseRevision(options.revisions[0])
 		if err != nil {
-			return "", err
+			return diffPlan{}, err
 		}
 		args = append(args, baseRevision, options.revisions[0])
+		return diffPlan{args: args, contextFrom: baseRevision, contextTo: options.revisions[0], supportsFileContext: true}, nil
 	case len(options.revisions) > 1:
-		return "", errors.New("git mode supports at most one -r revision")
+		return diffPlan{}, errors.New("git mode supports at most one -r revision")
+	default:
+		return diffPlan{args: args}, nil
 	}
-	return runCommand("git", appendPathFilters(args, options.paths)...)
 }
 
 func appendPathFilters(args []string, paths []string) []string {
@@ -206,56 +240,6 @@ func canonicalDir(path string) (string, error) {
 		return "", err
 	}
 	return resolved, nil
-}
-
-func (source *vcsSource) resolveFileContextRevisions(options cliOptions) (string, string, bool, error) {
-	switch source.kind {
-	case vcsJJ:
-		fromRev, toRev, ok := resolveJJFileContextRevisions(options)
-		return fromRev, toRev, ok, nil
-	case vcsGit:
-		return source.resolveGitFileContextRevisions(options)
-	default:
-		return "", "", false, nil
-	}
-}
-
-func resolveJJFileContextRevisions(options cliOptions) (string, string, bool) {
-	if options.fromRev != "" || options.toRev != "" {
-		fromRev := options.fromRev
-		if fromRev == "" {
-			fromRev = "@"
-		}
-		toRev := options.toRev
-		if toRev == "" {
-			toRev = "@"
-		}
-		return fromRev, toRev, true
-	}
-	if len(options.revisions) == 0 {
-		return "@-", "@", true
-	}
-	if len(options.revisions) == 1 && isSimpleJJRevision(options.revisions[0]) {
-		return options.revisions[0] + "-", options.revisions[0], true
-	}
-	return "", "", false
-}
-
-func (source *vcsSource) resolveGitFileContextRevisions(options cliOptions) (string, string, bool, error) {
-	switch {
-	case options.fromRev != "" && options.toRev != "":
-		return options.fromRev, options.toRev, true, nil
-	case options.toRev != "":
-		return "HEAD", options.toRev, true, nil
-	case len(options.revisions) == 1:
-		baseRevision, err := source.gitCommitBaseRevision(options.revisions[0])
-		if err != nil {
-			return "", "", false, err
-		}
-		return baseRevision, options.revisions[0], true, nil
-	default:
-		return "", "", false, nil
-	}
 }
 
 func isSimpleJJRevision(revision string) bool {

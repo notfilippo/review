@@ -72,12 +72,12 @@ func newReviewSession(input reviewInput) (*reviewSession, error) {
 	if err != nil {
 		return nil, err
 	}
-	files := parsePatchFiles(input.patch)
+	files, filePatches := parsePatch(input.patch)
 	return &reviewSession{
 		token:       token,
 		patch:       input.patch,
 		files:       files,
-		filePatches: mapFilePatches(input.patch),
+		filePatches: filePatches,
 		vcs:         input.vcs,
 		done:        make(chan struct{}),
 	}, nil
@@ -154,11 +154,7 @@ func (s *reviewSession) fileContexts() ([]fileContextResponse, error) {
 }
 
 func (s *reviewSession) rawFilePatch(file PatchFile) string {
-	rawPatch := s.filePatches[file.displayPath()]
-	if rawPatch == "" && file.PrevPath != "" {
-		rawPatch = s.filePatches[file.PrevPath]
-	}
-	return rawPatch
+	return coalesce(s.filePatches[file.displayPath()], s.filePatches[file.PrevPath])
 }
 
 func (s *reviewSession) handleComments(w http.ResponseWriter, r *http.Request) {

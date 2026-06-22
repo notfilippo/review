@@ -1,0 +1,17 @@
+export const DIFF_STYLE_STORAGE_KEY = "review.diffStyle";
+export const SIDEBAR_WIDTH_STORAGE_KEY = "review.sidebarWidth";
+export const DIFF_STYLE_SPLIT = "split";
+export const DIFF_STYLE_UNIFIED = "unified";
+export const DIFF_THEME = { light: "pierre-light", dark: "pierre-dark" };
+export const NARROW_VIEWPORT_QUERY = "(max-width: 56.25rem)";
+export const FALLBACK_ROOT_FONT_SIZE = 16;
+export const DIFF_BOTTOM_PADDING_REM = 0.5;
+export const SIDEBAR_RESIZE_STEP = 16;
+export const DEFAULT_COMMENT_SIDE = "additions";
+export const COMMENT_KIND_RANGE = "range";
+export const TREE_STATUS_ADDED = "added";
+export const TREE_STATUS_DELETED = "deleted";
+export const TREE_STATUS_MODIFIED = "modified";
+export const TREE_STATUS_RENAMED = "renamed";
+export const NEXT_FILE_KEYS = new Set(["j", "]"]);
+export const PREVIOUS_FILE_KEYS = new Set(["k", "["]);
