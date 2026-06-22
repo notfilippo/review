@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Review</title>
+    <script type="module" crossorigin src="/static/assets/index-Cva7RX7s.js"></script>
+    <link rel="stylesheet" crossorigin href="/static/assets/index-BjHjK07b.css">
+  </head>
+  <body>
+    <div id="app">
+      <header class="topbar">
+        <div class="brand">
+          <button id="tree-toggle" class="icon-button" type="button" aria-pressed="false" aria-label="Show file tree" title="Show file tree"></button>
+          <strong>Review</strong>
+          <span id="status">Loading</span>
+        </div>
+        <div class="actions">
+          <span id="comment-summary" class="comment-summary">0 comments</span>
+          <button id="layout-toggle" class="icon-button" type="button" aria-label="Switch to unified diff" title="Switch to unified diff"></button>
+          <button id="collapse-toggle" class="icon-button" type="button" aria-label="Collapse all files" title="Collapse all files"></button>
+          <button id="done" class="icon-button primary" type="button" aria-label="Finish review" title="Finish review"></button>
+        </div>
+      </header>
+      <main class="workspace">
+        <div id="tree-backdrop" class="tree-backdrop" aria-hidden="true"></div>
+        <aside class="sidebar">
+          <div id="tree" class="tree"></div>
+          <div class="sidebar-panels">
+            <details class="sidebar-pane" open>
+              <summary>
+                <span class="pane-title">
+                  <span class="pane-chevron" aria-hidden="true"></span>
+                  <span>Diff stats</span>
+                </span>
+                <span id="diff-stats-summary" class="pane-summary"></span>
+              </summary>
+              <div id="diff-stats" class="diff-stats"></div>
+            </details>
+          </div>
+          <div id="sidebar-resizer" class="sidebar-resizer" role="separator" aria-label="Resize file tree" aria-orientation="vertical" tabindex="0"></div>
+        </aside>
+        <section class="review">
+          <div id="diff" class="diff">
+            <div class="diff-loading" role="status" aria-live="polite">
+              <span class="diff-loading-spinner" aria-hidden="true"></span>
+              <span>Loading review</span>
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
+  </body>
+</html>
