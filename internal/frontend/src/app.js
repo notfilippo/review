@@ -1,4 +1,5 @@
 import "./style.css";
+import DiffsWorker from "@pierre/diffs/worker/worker.js?worker";
 import {
   Check,
   ChevronDown,
@@ -21,6 +22,7 @@ const DIFF_STYLE_STORAGE_KEY = "review.diffStyle";
 const SIDEBAR_WIDTH_STORAGE_KEY = "review.sidebarWidth";
 const DIFF_STYLE_SPLIT = "split";
 const DIFF_STYLE_UNIFIED = "unified";
+const DIFF_THEME = { light: "pierre-light", dark: "pierre-dark" };
 const NARROW_VIEWPORT_QUERY = "(max-width: 56.25rem)";
 const FALLBACK_ROOT_FONT_SIZE = 16;
 const DIFF_BOTTOM_PADDING_REM = 0.5;
@@ -97,10 +99,16 @@ async function init() {
       throw new Error("Missing review token");
     }
     bindActions();
-    const [{ CodeView, parsePatchFiles, processFile }, { FileTree, prepareFileTreeInput }] = await Promise.all([
+    const [
+      { CodeView, getFiletypeFromFileName, parsePatchFiles, processFile },
+      { FileTree, prepareFileTreeInput },
+      { getOrCreateWorkerPoolSingleton, terminateWorkerPoolSingleton },
+    ] = await Promise.all([
       import("@pierre/diffs"),
       import("@pierre/trees"),
+      import("@pierre/diffs/worker"),
     ]);
+    bindWorkerCleanup(terminateWorkerPoolSingleton);
     renderDiffLoading("Loading review");
     const session = await requestJSON("/api/session");
     state.comments = Array.isArray(session.comments) ? session.comments : [];
@@ -115,7 +123,8 @@ async function init() {
     state.diffStats = computeDiffStats(session.patch, state.files.length);
 
     setupTree(FileTree);
-    state.codeView = new CodeView(codeViewOptions());
+    const workerManager = createDiffWorkerManager(getOrCreateWorkerPoolSingleton, state.files, getFiletypeFromFileName);
+    state.codeView = new CodeView(codeViewOptions(), workerManager);
     els.diff.replaceChildren();
     state.codeView.setup(els.diff);
     renderDiffStats();
@@ -350,7 +359,7 @@ function selectedTreeFilePath(selectedPaths) {
 function codeViewOptions() {
   return {
     diffStyle: state.diffStyle,
-    theme: { light: "pierre-light", dark: "pierre-dark" },
+    theme: DIFF_THEME,
     layout: { paddingTop: 0, paddingBottom: rem(DIFF_BOTTOM_PADDING_REM), gap: 0 },
     overflow: "scroll",
     stickyHeaders: true,
@@ -375,6 +384,44 @@ function codeViewOptions() {
       startDraft(context?.item?.id, range);
     },
   };
+}
+
+function createDiffWorkerManager(getOrCreateWorkerPoolSingleton, files, getFiletypeFromFileName) {
+  try {
+    return getOrCreateWorkerPoolSingleton({
+      poolOptions: {
+        workerFactory: () => new DiffsWorker(),
+      },
+      highlighterOptions: {
+        theme: DIFF_THEME,
+        langs: languagesForFiles(files, getFiletypeFromFileName),
+      },
+    });
+  } catch (error) {
+    console.warn("Could not start diff worker pool", error);
+    return undefined;
+  }
+}
+
+function languagesForFiles(files, getFiletypeFromFileName) {
+  if (typeof getFiletypeFromFileName !== "function") {
+    return [];
+  }
+  const languages = new Set();
+  for (const file of files) {
+    const language = getFiletypeFromFileName(file.name);
+    if (language && language !== "text") {
+      languages.add(language);
+    }
+  }
+  return [...languages];
+}
+
+function bindWorkerCleanup(terminateWorkerPoolSingleton) {
+  if (typeof terminateWorkerPoolSingleton !== "function") {
+    return;
+  }
+  window.addEventListener("pagehide", terminateWorkerPoolSingleton, { once: true });
 }
 
 function bindActions() {

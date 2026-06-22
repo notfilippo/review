@@ -4,6 +4,9 @@ import { writeFileSync } from "node:fs";
 export default defineConfig({
   base: "/static/",
   root: "internal/frontend",
+  worker: {
+    format: "es",
+  },
   plugins: [
     {
       name: "review-static-placeholder",
