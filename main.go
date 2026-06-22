@@ -189,7 +189,7 @@ func serveReview(options cliOptions, session *reviewSession) error {
 		return err
 	}
 
-	_, err = io.WriteString(os.Stdout, formatMarkdown(session.finalComments(), session.files))
+	_, err = io.WriteString(os.Stdout, formatMarkdown(session.commentsSnapshot(), session.files))
 	return err
 }
 

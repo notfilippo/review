@@ -368,7 +368,7 @@ function codeViewOptions() {
     lineHoverHighlight: "both",
     hunkSeparators: "line-info",
     renderHeaderPrefix(fileDiff) {
-      return createFileHeaderToggle(fileDiff);
+      return createFileCollapseButton(fileDiff?.name);
     },
     onGutterUtilityClick(range, context) {
       startDraft(context?.item?.id, range);
@@ -457,7 +457,7 @@ function bindActions() {
 
   els.layoutToggle.addEventListener("click", () => {
     state.diffStyle = state.diffStyle === DIFF_STYLE_SPLIT ? DIFF_STYLE_UNIFIED : DIFF_STYLE_SPLIT;
-    saveDiffStyle(state.diffStyle);
+    writeStorageValue(DIFF_STYLE_STORAGE_KEY, state.diffStyle);
     syncLayoutToggle();
     if (!state.codeView) {
       return;
@@ -798,10 +798,6 @@ function readSavedDiffStyle() {
   return DIFF_STYLE_SPLIT;
 }
 
-function saveDiffStyle(diffStyle) {
-  writeStorageValue(DIFF_STYLE_STORAGE_KEY, diffStyle);
-}
-
 function readStorageValue(key) {
   try {
     return localStorage.getItem(key);
@@ -848,11 +844,7 @@ function toggleAllFilesCollapsed() {
   if (!state.codeView) {
     return;
   }
-  if (allFilesCollapsed()) {
-    state.collapsedFiles.clear();
-  } else {
-    state.collapsedFiles = new Set(state.files.map((file) => file.name));
-  }
+  state.collapsedFiles = allFilesCollapsed() ? new Set() : new Set(state.files.map((file) => file.name));
   renderDiffsAtSameScrollPosition();
 }
 
@@ -872,15 +864,10 @@ function allFilesCollapsed() {
   return state.files.length > 0 && state.files.every((file) => state.collapsedFiles.has(file.name));
 }
 
-function createFileHeaderToggle(fileDiff) {
-  const path = fileDiff && fileDiff.name;
+function createFileCollapseButton(path) {
   if (!path) {
     return undefined;
   }
-  return createFileCollapseButton(path);
-}
-
-function createFileCollapseButton(path) {
   const collapsed = state.collapsedFiles.has(path);
   const button = document.createElement("button");
   button.type = "button";

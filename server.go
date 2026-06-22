@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io/fs"
 	"net/http"
+	"slices"
 	"strings"
 	"sync"
 )
@@ -117,10 +118,6 @@ func (s *reviewSession) handleSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.mu.Lock()
-	comments := append([]ReviewComment(nil), s.comments...)
-	s.mu.Unlock()
-
 	contexts, err := s.fileContexts()
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
@@ -129,9 +126,9 @@ func (s *reviewSession) handleSession(w http.ResponseWriter, r *http.Request) {
 
 	resp := sessionResponse{
 		Patch:        s.patch,
-		Files:        append([]PatchFile(nil), s.files...),
+		Files:        slices.Clone(s.files),
 		FileContexts: contexts,
-		Comments:     comments,
+		Comments:     s.commentsSnapshot(),
 	}
 	writeJSON(w, http.StatusOK, resp)
 }
@@ -169,13 +166,11 @@ func (s *reviewSession) handleComments(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	comments, err := decodeComments(r)
-	if err != nil {
+	if err := s.replaceCommentsFromRequest(r); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
-	s.replaceComments(comments)
 	writeOK(w)
 }
 
@@ -185,12 +180,10 @@ func (s *reviewSession) handleComplete(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if r.Body != nil && r.ContentLength != 0 {
-		comments, err := decodeComments(r)
-		if err != nil {
+		if err := s.replaceCommentsFromRequest(r); err != nil {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
-		s.replaceComments(comments)
 	}
 
 	s.once.Do(func() {
@@ -253,16 +246,21 @@ func (s *reviewSession) authorized(r *http.Request) bool {
 	return token != "" && token == s.token
 }
 
-func (s *reviewSession) finalComments() []ReviewComment {
+func (s *reviewSession) commentsSnapshot() []ReviewComment {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return append([]ReviewComment(nil), s.comments...)
+	return slices.Clone(s.comments)
 }
 
-func (s *reviewSession) replaceComments(comments []ReviewComment) {
+func (s *reviewSession) replaceCommentsFromRequest(r *http.Request) error {
+	comments, err := decodeComments(r)
+	if err != nil {
+		return err
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.comments = normalizeComments(comments)
+	return nil
 }
 
 func decodeComments(r *http.Request) ([]ReviewComment, error) {
