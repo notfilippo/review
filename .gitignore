@@ -1,0 +1,4 @@
+review
+node_modules/
+internal/static/*
+!internal/static/README.md
