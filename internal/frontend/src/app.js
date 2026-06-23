@@ -30,6 +30,11 @@ import {
 } from "./layout.js";
 import { buildReviewFiles, fileCommentKey, orderFilesForTree } from "./patch-files.js";
 import { computeDiffStats, renderDiffStats } from "./stats.js";
+import {
+  handleSearchKey,
+  refreshSearchResults,
+  setupSearch,
+} from "./search.js";
 import { els, narrowViewportQuery, state } from "./state.js";
 import { readSavedDiffStyle, writeStorageValue } from "./storage.js";
 import { setupTree } from "./tree.js";
@@ -67,6 +72,7 @@ async function init() {
     state.fileKeyToReviewId = new Map(state.files.map((file) => [fileCommentKey(file.name), file.reviewId]));
     state.patchText = session.patch || "";
     state.diffStats = computeDiffStats(state.patchText, state.files.length);
+    refreshSearchResults();
 
     setupTree(FileTree);
     const workerManager = createDiffWorkerManager(getOrCreateWorkerPoolSingleton, state.files, getFiletypeFromFileName);
@@ -102,6 +108,7 @@ function bindActions() {
   setIconButton(els.done, "Check", "Finish review");
   syncLayoutToggle();
   syncCollapseToggle();
+  setupSearch();
   restoreSidebarWidth();
   setTreeCollapsed(isNarrowViewport());
   bindSidebarResizer();
@@ -121,6 +128,9 @@ function bindActions() {
     syncTreeToggle();
   });
   window.addEventListener("keydown", (event) => {
+    if (handleSearchKey(event)) {
+      return;
+    }
     if (event.key === "Escape" && isNarrowViewport() && !state.treeCollapsed) {
       setTreeCollapsed(true);
       return;

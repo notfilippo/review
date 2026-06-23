@@ -7,6 +7,7 @@ export const NARROW_VIEWPORT_QUERY = "(max-width: 56.25rem)";
 export const FALLBACK_ROOT_FONT_SIZE = 16;
 export const DIFF_BOTTOM_PADDING_REM = 0.5;
 export const SIDEBAR_RESIZE_STEP = 16;
+export const MAX_SEARCH_MATCHES = 1000;
 export const DEFAULT_COMMENT_SIDE = "additions";
 export const TREE_STATUS_ADDED = "added";
 export const TREE_STATUS_DELETED = "deleted";

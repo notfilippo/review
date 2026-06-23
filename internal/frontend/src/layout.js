@@ -23,9 +23,12 @@ export function setTreeCollapsed(collapsed) {
 export function syncTreeToggle() {
   const bottomSheet = isNarrowViewport();
   const treeLabel = state.treeCollapsed ? "Show file tree" : "Hide file tree";
-  const iconName = bottomSheet
-    ? (state.treeCollapsed ? "PanelBottomOpen" : "PanelBottomClose")
-    : (state.treeCollapsed ? "PanelLeftOpen" : "PanelLeftClose");
+  let iconName;
+  if (bottomSheet) {
+    iconName = state.treeCollapsed ? "PanelBottomOpen" : "PanelBottomClose";
+  } else {
+    iconName = state.treeCollapsed ? "PanelLeftOpen" : "PanelLeftClose";
+  }
   setIconButton(els.treeToggle, iconName, treeLabel);
 }
 

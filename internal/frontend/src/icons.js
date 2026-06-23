@@ -1,4 +1,6 @@
 import {
+  ArrowDown,
+  ArrowUp,
   Check,
   ChevronDown,
   ChevronRight,
@@ -11,12 +13,15 @@ import {
   PanelLeftOpen,
   Pencil,
   Rows2,
+  Search,
   Trash2,
   X,
   createElement,
 } from "lucide";
 
 const icons = {
+  ArrowDown,
+  ArrowUp,
   Check,
   ChevronDown,
   ChevronRight,
@@ -29,6 +34,7 @@ const icons = {
   PanelLeftOpen,
   Pencil,
   Rows2,
+  Search,
   Trash2,
   X,
 };

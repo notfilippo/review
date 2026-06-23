@@ -39,7 +39,10 @@ export function startDraft(reviewId, range) {
 function createAnnotationAction(iconName, label, className = "") {
   const button = document.createElement("button");
   button.type = "button";
-  button.className = `icon-button annotation-icon-button${className ? ` ${className}` : ""}`;
+  button.classList.add("icon-button", "annotation-icon-button");
+  if (className) {
+    button.classList.add(className);
+  }
   setIconButton(button, iconName, label);
   return button;
 }

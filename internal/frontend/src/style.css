@@ -23,6 +23,7 @@
   --primary-hover: color-mix(in srgb, var(--accent) 88%, white);
   --backdrop: rgb(0 0 0 / 0.42);
   --shadow: 0 0.0625rem 0.125rem rgb(16 24 40 / 0.08);
+  --floating-shadow: 0 0.375rem 1rem rgb(16 24 40 / 0.16);
   --sheet-shadow: 0 -1.125rem 2.75rem rgb(0 0 0 / 0.35);
   --font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   --font-size-xs: 0.75rem;
@@ -83,6 +84,7 @@
     --danger: #ff6762;
     --primary-hover: #0190e7;
     --shadow: none;
+    --floating-shadow: 0 0.625rem 1.5rem rgb(0 0 0 / 0.42);
   }
 }
 
@@ -113,22 +115,31 @@ body {
 }
 
 button,
+input,
 textarea {
   font: inherit;
+  border: var(--border-width) solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+  color: var(--text);
 }
 
 button {
   min-height: var(--control-size);
   padding: 0 var(--space-3);
-  border: var(--border-width) solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--panel);
-  color: var(--text);
   cursor: pointer;
 }
 
-button:hover {
+button:not(:disabled):hover {
   border-color: var(--accent);
+}
+
+button:focus-visible,
+input:focus-visible,
+textarea:focus-visible {
+  border-color: var(--accent-2);
+  outline: none;
+  box-shadow: 0 0 0 0.125rem color-mix(in srgb, var(--accent-2) 22%, transparent);
 }
 
 button:disabled {
@@ -148,7 +159,7 @@ button:disabled {
   color: var(--muted);
 }
 
-.icon-button:hover {
+.icon-button:not(:disabled):hover {
   border-color: var(--border);
   background: var(--hover);
   color: var(--text);
@@ -165,7 +176,7 @@ button:disabled {
   color: white;
 }
 
-.icon-button.primary:hover {
+.icon-button.primary:not(:disabled):hover {
   background: var(--primary-hover);
   border-color: var(--primary-hover);
   color: white;
@@ -179,9 +190,6 @@ button:disabled {
   width: var(--icon-size);
   height: var(--icon-size);
   flex: none;
-}
-
-.icon {
   fill: none;
   stroke: currentColor;
   stroke-width: 2;
@@ -194,10 +202,14 @@ textarea {
   min-height: var(--textarea-min-height);
   padding: var(--space-2-5);
   resize: vertical;
-  border: var(--border-width) solid var(--border);
-  border-radius: var(--radius-sm);
+}
+
+input {
   background: var(--input-bg);
-  color: var(--text);
+}
+
+textarea {
+  background: var(--input-bg);
 }
 
 .topbar {
@@ -228,10 +240,76 @@ textarea {
   font-size: var(--font-size-xs);
 }
 
+.brand span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .actions {
   display: flex;
   align-items: center;
   gap: var(--space-2);
+}
+
+.code-search {
+  --search-control-size: 1.75rem;
+
+  position: fixed;
+  top: calc(var(--topbar-height) + var(--space-1));
+  right: var(--space-2);
+  z-index: 15;
+  display: grid;
+  grid-template-columns: minmax(8rem, 1fr) minmax(3rem, auto) repeat(3, var(--search-control-size));
+  align-items: center;
+  gap: calc(var(--space-1) / 2);
+  width: min(22.5rem, calc(100vw - var(--space-4) * 2));
+  padding: calc(var(--space-1) / 2);
+  border: var(--border-width) solid var(--border-opaque);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+  box-shadow: var(--floating-shadow);
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(calc(var(--space-1) * -1));
+  transition:
+    opacity 120ms ease,
+    transform 120ms ease;
+}
+
+.code-search[data-open="true"] {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateY(0);
+}
+
+.search-input {
+  width: 100%;
+  min-width: 0;
+  height: var(--search-control-size);
+  padding: 0 var(--space-1-5);
+  font-size: var(--font-size-sm);
+}
+
+.search-count {
+  min-width: 3rem;
+  padding: 0 var(--space-1);
+  color: var(--muted);
+  font-size: var(--font-size-xs);
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.search-nav {
+  width: var(--search-control-size);
+  min-width: var(--search-control-size);
+  min-height: var(--search-control-size);
+}
+
+.search-nav .icon {
+  width: var(--icon-size-sm);
+  height: var(--icon-size-sm);
 }
 
 .workspace {
@@ -607,8 +685,25 @@ textarea {
   }
 
   .actions {
-    flex-wrap: wrap;
+    min-width: 0;
+    flex-wrap: nowrap;
     justify-content: flex-end;
+    gap: var(--space-1);
+  }
+
+  .code-search {
+    right: var(--space-2);
+    left: var(--space-2);
+    grid-template-columns: minmax(0, 1fr) auto auto auto auto;
+    width: auto;
+  }
+
+  .search-count {
+    min-width: 2.75rem;
+  }
+
+  .comment-summary {
+    display: none;
   }
 }
 

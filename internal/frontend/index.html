@@ -26,11 +26,19 @@
         </div>
         <div class="actions">
           <span id="comment-summary" class="comment-summary">0 comments</span>
+          <button id="search-toggle" class="icon-button" type="button" aria-pressed="false" aria-label="Search diff" title="Search diff"></button>
           <button id="layout-toggle" class="icon-button" type="button" aria-label="Switch to unified diff" title="Switch to unified diff"></button>
           <button id="collapse-toggle" class="icon-button" type="button" aria-label="Collapse all files" title="Collapse all files"></button>
           <button id="done" class="icon-button primary" type="button" aria-label="Finish review" title="Finish review"></button>
         </div>
       </header>
+      <div id="code-search" class="code-search" role="search" data-open="false">
+        <input id="search-input" class="search-input" type="search" placeholder="Search" autocomplete="off" spellcheck="false" aria-label="Search diff">
+        <span id="search-count" class="search-count" aria-live="polite"></span>
+        <button id="search-prev" class="icon-button search-nav" type="button" aria-label="Previous search result" title="Previous search result"></button>
+        <button id="search-next" class="icon-button search-nav" type="button" aria-label="Next search result" title="Next search result"></button>
+        <button id="search-close" class="icon-button search-nav" type="button" aria-label="Close search" title="Close search"></button>
+      </div>
       <main class="workspace">
         <div id="tree-backdrop" class="tree-backdrop" aria-hidden="true"></div>
         <aside class="sidebar">
