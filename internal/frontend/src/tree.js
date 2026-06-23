@@ -5,11 +5,11 @@ import { els, state } from "./state.js";
 
 export function setupTree(FileTree) {
   state.tree = new FileTree({
-    paths: state.files.map((file) => file.name),
+    paths: state.files.map((file) => file.treePath),
     flattenEmptyDirectories: true,
     initialExpansion: "open",
     search: true,
-    gitStatus: state.files.map((file) => ({ path: file.name, status: gitStatus(file.type) })),
+    gitStatus: state.files.map((file) => ({ path: file.treePath, status: gitStatus(file.type) })),
     onSelectionChange(selectedPaths) {
       if (state.syncingTree) {
         return;
@@ -18,11 +18,15 @@ export function setupTree(FileTree) {
       if (!path) {
         return;
       }
-      syncTreeSelection(path, selectedPaths);
+      const file = state.filesByTreePath.get(path);
+      if (!file) {
+        return;
+      }
+      syncTreeSelection(file.reviewId, selectedPaths);
       if (isNarrowViewport()) {
         setTreeCollapsed(true);
       }
-      setCurrentPath(path, { scrollDiff: true, selectTree: false });
+      setCurrentPath(file.reviewId, { scrollDiff: true, selectTree: false });
     },
   });
   state.tree.render({ containerWrapper: els.tree });
@@ -30,25 +34,27 @@ export function setupTree(FileTree) {
 
 function selectedTreeFilePath(selectedPaths) {
   const focusedPath = state.tree.getFocusedPath?.() || "";
-  if (state.filesByPath.has(focusedPath) && selectedPaths.includes(focusedPath)) {
+  if (state.filesByTreePath.has(focusedPath) && selectedPaths.includes(focusedPath)) {
     return focusedPath;
   }
-  return [...selectedPaths].reverse().find((path) => state.filesByPath.has(path)) || "";
+  return [...selectedPaths].reverse().find((path) => state.filesByTreePath.has(path)) || "";
 }
 
 export function syncTreeSelection(path, selectedPaths = state.tree.getSelectedPaths?.() || []) {
-  const item = state.tree && state.tree.getItem(path);
+  const file = state.filesByPath.get(path);
+  const treePath = file?.treePath || path;
+  const item = state.tree && state.tree.getItem(treePath);
   if (!item) {
     return;
   }
-  if (item.isSelected() && selectedPaths.length === 1 && selectedPaths[0] === path) {
+  if (item.isSelected() && selectedPaths.length === 1 && selectedPaths[0] === treePath) {
     return;
   }
 
   state.syncingTree = true;
   try {
     for (const selectedPath of selectedPaths) {
-      if (selectedPath !== path) {
+      if (selectedPath !== treePath) {
         state.tree.getItem(selectedPath)?.deselect();
       }
     }

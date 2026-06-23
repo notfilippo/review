@@ -1,13 +1,14 @@
-import { COMMENT_KIND_RANGE, DEFAULT_COMMENT_SIDE } from "./constants.js";
+import { DEFAULT_COMMENT_SIDE } from "./constants.js";
 import { requestJSON } from "./api.js";
 import { renderDiffs, setCurrentPath } from "./diff-view.js";
 import { setIconButton } from "./icons.js";
+import { fileCommentKey } from "./patch-files.js";
 import { els, state } from "./state.js";
 import { stopDiffEvents } from "./util.js";
 
-export function annotationsForPath(path) {
-  const comments = state.comments.filter((comment) => comment.path === path && comment.kind === COMMENT_KIND_RANGE);
-  if (state.draft && state.draft.path === path && state.draft.kind === COMMENT_KIND_RANGE) {
+export function annotationsForFile(file) {
+  const comments = state.comments.filter((comment) => sameFileComment(comment, file));
+  if (state.draft && sameFileComment(state.draft, file)) {
     comments.push(state.draft);
   }
   return comments.map((comment) => ({
@@ -17,17 +18,17 @@ export function annotationsForPath(path) {
   }));
 }
 
-export function startDraft(path, range) {
-  if (!range || !path || !state.filesByPath.has(path)) {
+export function startDraft(reviewId, range) {
+  const file = state.filesByPath.get(reviewId);
+  if (!range || !file) {
     return;
   }
   const normalized = normalizeRange(range);
-  setCurrentPath(path, { scrollDiff: false, selectTree: true });
+  setCurrentPath(reviewId, { scrollDiff: false, selectTree: true });
   clearActiveComment();
   state.draft = {
     id: `draft-${crypto.randomUUID()}`,
-    kind: COMMENT_KIND_RANGE,
-    path,
+    path: file.name,
     ...normalized,
     text: "",
     draft: true,
@@ -210,8 +211,13 @@ export function applyActiveSelection() {
     return;
   }
   queueMicrotask(() => {
+    const reviewId = reviewIdForComment(comment);
+    if (!reviewId) {
+      state.codeView.clearSelectedLines({ notify: false });
+      return;
+    }
     state.codeView.setSelectedLines({
-      id: comment.path,
+      id: reviewId,
       range: selectionRange(comment),
     }, { notify: false });
   });
@@ -234,40 +240,48 @@ function normalizeRange(range) {
   if (range.start <= range.end) {
     return {
       side: range.side || range.endSide || DEFAULT_COMMENT_SIDE,
-      startLine: range.start,
-      endLine: range.end,
-      endSide: range.endSide || range.side || DEFAULT_COMMENT_SIDE,
+      start_line: range.start,
+      end_line: range.end,
+      end_side: range.endSide || range.side || DEFAULT_COMMENT_SIDE,
     };
   }
   return {
     side: range.endSide || range.side || DEFAULT_COMMENT_SIDE,
-    startLine: range.end,
-    endLine: range.start,
-    endSide: range.side || range.endSide || DEFAULT_COMMENT_SIDE,
+    start_line: range.end,
+    end_line: range.start,
+    end_side: range.side || range.endSide || DEFAULT_COMMENT_SIDE,
   };
 }
 
 function selectionRange(comment) {
   return {
-    start: comment.startLine,
+    start: comment.start_line,
     side: comment.side || DEFAULT_COMMENT_SIDE,
-    end: comment.endLine,
-    endSide: comment.endSide || comment.side || DEFAULT_COMMENT_SIDE,
+    end: comment.end_line,
+    endSide: comment.end_side || comment.side || DEFAULT_COMMENT_SIDE,
   };
 }
 
 function annotationLine(comment) {
-  return comment.endLine || comment.startLine;
+  return comment.end_line || comment.start_line;
 }
 
 function annotationSide(comment) {
-  return comment.endSide || comment.side || DEFAULT_COMMENT_SIDE;
+  return comment.end_side || comment.side || DEFAULT_COMMENT_SIDE;
+}
+
+function sameFileComment(comment, file) {
+  return comment.path === file.name;
+}
+
+function reviewIdForComment(comment) {
+  return state.fileKeyToReviewId.get(fileCommentKey(comment.path)) || "";
 }
 
 function rangeLabel(comment) {
   const side = comment.side || "line";
-  if (comment.startLine === comment.endLine) {
-    return `${side} line ${comment.startLine}`;
+  if (comment.start_line === comment.end_line) {
+    return `${side} line ${comment.start_line}`;
   }
-  return `${side} lines ${comment.startLine}-${comment.endLine}`;
+  return `${side} lines ${comment.start_line}-${comment.end_line}`;
 }

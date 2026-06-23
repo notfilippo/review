@@ -491,6 +491,14 @@ textarea {
   height: var(--icon-size-sm);
 }
 
+.file-header-prefix {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  margin-right: var(--space-2);
+  vertical-align: middle;
+}
+
 .annotation-icon-button {
   width: var(--annotation-action-size);
   min-width: var(--annotation-action-size);

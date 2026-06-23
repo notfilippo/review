@@ -8,7 +8,6 @@ export const FALLBACK_ROOT_FONT_SIZE = 16;
 export const DIFF_BOTTOM_PADDING_REM = 0.5;
 export const SIDEBAR_RESIZE_STEP = 16;
 export const DEFAULT_COMMENT_SIDE = "additions";
-export const COMMENT_KIND_RANGE = "range";
 export const TREE_STATUS_ADDED = "added";
 export const TREE_STATUS_DELETED = "deleted";
 export const TREE_STATUS_MODIFIED = "modified";

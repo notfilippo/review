@@ -6,7 +6,7 @@ import {
 } from "./constants.js";
 import createDiffsWorker from "https://esm.sh/@pierre/diffs@1.2.11/worker/worker-portable.js?worker";
 import {
-  annotationsForPath,
+  annotationsForFile,
   applyActiveSelection,
   createAnnotationCard,
   findAnnotationComment,
@@ -61,7 +61,7 @@ export function codeViewOptions() {
     lineHoverHighlight: "both",
     hunkSeparators: "line-info",
     renderHeaderPrefix(fileDiff) {
-      return createFileCollapseButton(fileDiff?.name);
+      return createFileHeaderPrefix(fileDiff);
     },
     onGutterUtilityClick(range, context) {
       startDraft(context?.item?.id, range);
@@ -120,11 +120,12 @@ export function bindWorkerCleanup(terminateWorkerPoolSingleton) {
 export function setCurrentPath(path, options = {}) {
   const { scrollDiff = true, selectTree = false } = options;
   state.currentPath = path;
+  const file = state.filesByPath.get(path);
   if (state.tree && selectTree) {
     syncTreeSelection(path);
   }
-  if (state.tree) {
-    state.tree.scrollToPath(path, { focus: false, offset: "nearest" });
+  if (state.tree && file) {
+    state.tree.scrollToPath(file.treePath, { focus: false, offset: "nearest" });
   }
   if (scrollDiff) {
     scrollToCurrentFile("smooth");
@@ -142,11 +143,11 @@ export function renderDiffs() {
 
 function codeViewItem(file) {
   return {
-    id: file.name,
+    id: file.reviewId,
     type: "diff",
     fileDiff: file,
-    annotations: annotationsForPath(file.name),
-    collapsed: state.collapsedFiles.has(file.name),
+    annotations: annotationsForFile(file),
+    collapsed: state.collapsedFiles.has(file.reviewId),
     version: state.renderVersion,
   };
 }
@@ -162,7 +163,7 @@ function refreshFileDiff(path) {
   }
 
   nextRenderVersion();
-  if (!state.codeView.getItem(file.name)) {
+  if (!state.codeView.getItem(file.reviewId)) {
     return false;
   }
 
@@ -206,7 +207,7 @@ function moveCurrentFile(delta) {
     return;
   }
 
-  const currentIndex = state.files.findIndex((file) => file.name === state.currentPath);
+  const currentIndex = state.files.findIndex((file) => file.reviewId === state.currentPath);
   const fallbackIndex = delta > 0 ? -1 : state.files.length;
   const nextIndex = clamp(
     currentIndex === -1 ? fallbackIndex + delta : currentIndex + delta,
@@ -214,8 +215,8 @@ function moveCurrentFile(delta) {
     state.files.length - 1,
   );
   const nextFile = state.files[nextIndex];
-  if (nextFile && nextFile.name !== state.currentPath) {
-    setCurrentPath(nextFile.name, { scrollDiff: true, selectTree: true });
+  if (nextFile && nextFile.reviewId !== state.currentPath) {
+    setCurrentPath(nextFile.reviewId, { scrollDiff: true, selectTree: true });
   }
 }
 
@@ -248,7 +249,7 @@ export function toggleAllFilesCollapsed() {
   if (!state.codeView) {
     return;
   }
-  state.collapsedFiles = allFilesCollapsed() ? new Set() : new Set(state.files.map((file) => file.name));
+  state.collapsedFiles = allFilesCollapsed() ? new Set() : new Set(state.files.map((file) => file.reviewId));
   renderDiffsAtSameScrollPosition();
 }
 
@@ -265,14 +266,21 @@ export function renderDiffsAtSameScrollPosition() {
 }
 
 export function allFilesCollapsed() {
-  return state.files.length > 0 && state.files.every((file) => state.collapsedFiles.has(file.name));
+  return state.files.length > 0 && state.files.every((file) => state.collapsedFiles.has(file.reviewId));
 }
 
-function createFileCollapseButton(path) {
-  if (!path) {
+function createFileHeaderPrefix(fileDiff) {
+  if (!fileDiff?.reviewId) {
     return undefined;
   }
-  const collapsed = state.collapsedFiles.has(path);
+  const wrapper = document.createElement("span");
+  wrapper.className = "file-header-prefix";
+  wrapper.append(createFileCollapseButton(fileDiff.reviewId));
+  return wrapper;
+}
+
+function createFileCollapseButton(reviewId) {
+  const collapsed = state.collapsedFiles.has(reviewId);
   const button = document.createElement("button");
   button.type = "button";
   button.className = "icon-button file-collapse-button";
@@ -285,7 +293,7 @@ function createFileCollapseButton(path) {
   button.addEventListener("click", (event) => {
     event.preventDefault();
     event.stopPropagation();
-    toggleFileCollapsed(path);
+    toggleFileCollapsed(reviewId);
   });
   button.addEventListener("pointerdown", (event) => {
     event.stopPropagation();

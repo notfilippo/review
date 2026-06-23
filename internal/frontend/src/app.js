@@ -28,7 +28,7 @@ import {
   syncLayoutToggle,
   syncTreeToggle,
 } from "./layout.js";
-import { buildReviewFiles, orderFilesForTree } from "./patch-files.js";
+import { buildReviewFiles, fileCommentKey, orderFilesForTree } from "./patch-files.js";
 import { computeDiffStats, renderDiffStats } from "./stats.js";
 import { els, narrowViewportQuery, state } from "./state.js";
 import { readSavedDiffStyle, writeStorageValue } from "./storage.js";
@@ -61,12 +61,12 @@ async function init() {
     renderDiffLoading("Processing diff");
     await afterNextPaint();
     state.files = buildReviewFiles(session, parsePatchFiles, processFile);
-    if (state.files.length === 0 && Array.isArray(session.files)) {
-      state.files = session.files.map((file) => ({ name: file.path, type: file.status, hunks: [] }));
-    }
     state.files = orderFilesForTree(state.files, prepareFileTreeInput);
-    state.filesByPath = new Map(state.files.map((file) => [file.name, file]));
-    state.diffStats = computeDiffStats(session.patch, state.files.length);
+    state.filesByPath = new Map(state.files.map((file) => [file.reviewId, file]));
+    state.filesByTreePath = new Map(state.files.map((file) => [file.treePath, file]));
+    state.fileKeyToReviewId = new Map(state.files.map((file) => [fileCommentKey(file.name), file.reviewId]));
+    state.patchText = session.patch || "";
+    state.diffStats = computeDiffStats(state.patchText, state.files.length);
 
     setupTree(FileTree);
     const workerManager = createDiffWorkerManager(getOrCreateWorkerPoolSingleton, state.files, getFiletypeFromFileName);
@@ -79,8 +79,8 @@ async function init() {
     const firstFile = state.files[0];
     if (firstFile) {
       renderDiffs();
-      setCurrentPath(firstFile.name, { scrollDiff: false, selectTree: true });
-      els.status.textContent = `${state.files.length} file${state.files.length === 1 ? "" : "s"}`;
+      setCurrentPath(firstFile.reviewId, { scrollDiff: false, selectTree: true });
+      els.status.textContent = statusText();
     } else {
       els.status.textContent = "No files";
       renderDiffMessage("annotation-empty", "No files found in patch.");
@@ -91,6 +91,10 @@ async function init() {
     }
     renderFatal(error);
   }
+}
+
+function statusText() {
+  return `${state.files.length} file${state.files.length === 1 ? "" : "s"}`;
 }
 
 function bindActions() {

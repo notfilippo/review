@@ -1,40 +1,16 @@
 # Review
 
-Review is a local code review UI for reviewing jj or git diffs in the browser.
+Local review UI for jj and Git repositories.
 
-It starts a local web server, opens a diff review UI, and prints the completed
-review comments as Markdown when you click Done.
-
-## Install
-
-```sh
-go install github.com/notfilippo/review@latest
-```
+`review` starts a browser UI for reading a diff, leaving inline comments, and exporting those comments as Markdown.
 
 ## Usage
 
-Review the current jj change or git working tree:
-
 ```sh
-review
+cargo install --git git@github.com:notfilippo/review.git
+review --help
 ```
 
-Review a single revision:
+For jj repositories, pass a revset. The tool renders the whole `jj diff -r <revset>` result as one review.
 
-```sh
-review -r REV
-```
-
-Review an explicit range:
-
-```sh
-review -from BASE -to HEAD
-```
-
-Run `review -help` for all flags.
-
-## Development
-
-```sh
-go run .
-```
+For Git repositories, pass `--from` and `--to` to review a commit range.
