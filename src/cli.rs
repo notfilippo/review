@@ -19,7 +19,7 @@ pub struct CliOptions {
 }
 
 #[derive(Debug, Parser)]
-#[command(name = "review")]
+#[command(author, version, about)]
 struct Args {
     #[arg(long = "addr", value_name = "ADDR")]
     addr: Option<SocketAddr>,
