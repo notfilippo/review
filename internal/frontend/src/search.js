@@ -6,13 +6,16 @@ import { afterNextPaint, stopDiffEvents } from "./util.js";
 
 const LINE_OUTLINE_SHADOW = "inset 0 0 0 2px var(--accent-2)";
 const LINE_OUTLINE_BACKGROUND = "color-mix(in srgb, var(--accent-2) 16%, transparent)";
+const CURRENT_LINE_OUTLINE_BACKGROUND = "color-mix(in srgb, var(--accent-2) 28%, transparent)";
 const TEXT_HIGHLIGHT_BACKGROUND = "color-mix(in srgb, var(--accent-2) 28%, transparent)";
 const CURRENT_TEXT_HIGHLIGHT_BACKGROUND = "color-mix(in srgb, var(--accent-2) 48%, transparent)";
 const SEARCH_SIDE_SELECTOR = "[data-additions], [data-deletions], [data-unified]";
+const DEFAULT_COLLAPSED_CONTEXT_THRESHOLD = 1;
 
-let outlinedLines = [];
+let renderedLineHighlights = [];
 let highlightMarkers = [];
 let diffObserver;
+let indexedExpandedContext = "";
 
 export function setupSearch() {
   setIconButton(els.searchToggle, "Search", "Search diff");
@@ -72,7 +75,7 @@ export function refreshSearchResults() {
     syncSearchControls();
     return;
   }
-  setSearchQuery(state.search.query);
+  setSearchQuery(state.search.query, { preserveCurrent: true });
 }
 
 function handleSearchInputKeyDown(event) {
@@ -164,7 +167,9 @@ function setSearchOpen(open) {
   }
 }
 
-function setSearchQuery(query) {
+function setSearchQuery(query, options = {}) {
+  const { jump = true, preserveCurrent = false } = options;
+  const previous = preserveCurrent ? currentSearchMatch() : undefined;
   state.search.query = query;
   clearRenderedSearchHighlight();
 
@@ -172,16 +177,41 @@ function setSearchQuery(query) {
     state.search.matches = [];
     state.search.currentIndex = -1;
     state.search.truncated = false;
+    indexedExpandedContext = "";
     syncSearchControls();
     return;
   }
 
   const result = collectMatches(query);
   state.search.matches = result.matches;
-  state.search.currentIndex = result.matches.length === 0 ? -1 : 0;
+  state.search.currentIndex = nextCurrentSearchIndex(result.matches, previous);
   state.search.truncated = result.truncated;
+  indexedExpandedContext = expandedContextSignature();
   syncSearchControls();
-  jumpToCurrentSearchMatch();
+  if (jump) {
+    jumpToCurrentSearchMatch();
+  } else {
+    scheduleCurrentSearchHighlight();
+  }
+}
+
+function nextCurrentSearchIndex(matches, previous) {
+  if (matches.length === 0) {
+    return -1;
+  }
+  if (!previous) {
+    return 0;
+  }
+  const index = matches.findIndex((match) => sameSearchMatch(match, previous));
+  return index === -1 ? 0 : index;
+}
+
+function sameSearchMatch(left, right) {
+  return left.path === right.path
+    && left.side === right.side
+    && left.lineNumber === right.lineNumber
+    && left.startColumn === right.startColumn
+    && left.endColumn === right.endColumn;
 }
 
 function moveSearch(delta) {
@@ -214,6 +244,11 @@ function jumpToCurrentSearchMatch() {
     renderDiffs();
   }
 
+  if (match.hidden && expandHiddenSearchMatch(match)) {
+    setSearchQuery(state.search.query, { preserveCurrent: true });
+    return;
+  }
+
   setCurrentPath(match.path, { scrollDiff: false, selectTree: true });
   state.codeView.scrollTo({
     type: "line",
@@ -228,6 +263,19 @@ function jumpToCurrentSearchMatch() {
 
 function currentSearchMatch() {
   return state.search.matches[state.search.currentIndex];
+}
+
+function expandHiddenSearchMatch(match) {
+  if (match.expandIndex == null || !match.expandDirection || !match.expandLineCount) {
+    return false;
+  }
+  const item = state.codeView?.idToItem?.get(match.path);
+  const expandHunk = item?.instance?.expandHunk;
+  if (typeof expandHunk !== "function") {
+    return false;
+  }
+  expandHunk(match.expandIndex, match.expandDirection, match.expandLineCount);
+  return true;
 }
 
 function collectMatches(query) {
@@ -256,10 +304,14 @@ function collectMatches(query) {
 }
 
 function* searchLinesForFile(file) {
+  const seen = new Set();
   let hasHunkLines = false;
-  for (const hunk of file.hunks || []) {
+  const expandedContext = expandedContextForFile(file);
+  for (const [hunkIndex, hunk] of (file.hunks || []).entries()) {
     let deletionLine = hunk.deletionStart;
     let additionLine = hunk.additionStart;
+
+    yield* searchLeadingContext(file, hunk, hunkIndex, expandedContext, seen);
 
     for (const content of hunk.hunkContent || []) {
       if (content.type === "context") {
@@ -271,6 +323,7 @@ function* searchLinesForFile(file) {
           file.additionLines,
           content.additionLineIndex,
           content.lines,
+          seen,
         );
         deletionLine += content.lines;
         additionLine += content.lines;
@@ -283,6 +336,7 @@ function* searchLinesForFile(file) {
           file.deletionLines,
           content.deletionLineIndex,
           content.deletions,
+          seen,
         );
         yield* searchLineRange(
           file,
@@ -291,6 +345,7 @@ function* searchLinesForFile(file) {
           file.additionLines,
           content.additionLineIndex,
           content.additions,
+          seen,
         );
         deletionLine += content.deletions;
         additionLine += content.additions;
@@ -298,36 +353,284 @@ function* searchLinesForFile(file) {
     }
   }
 
+  yield* searchTrailingContext(file, expandedContext, seen);
+
   if (hasHunkLines) {
     return;
   }
 
-  const hasAdditions = file.additionLines?.length > 0;
+  const hasAdditions = hasSearchableLines(file.additionLines);
   const lines = hasAdditions ? file.additionLines : file.deletionLines || [];
   const side = hasAdditions ? "additions" : "deletions";
-  for (let index = 0; index < lines.length; index += 1) {
-    yield searchLine(file, side, index + 1, lines[index]);
+  yield* searchSideLines(file, side, lines, seen);
+}
+
+function hasSearchableLines(lines) {
+  return lines?.length > 0;
+}
+
+function expandedContextForFile(file) {
+  if (file.isPartial !== false) {
+    return undefined;
+  }
+  const item = state.codeView?.idToItem?.get(file.reviewId);
+  const instance = item?.instance;
+  return {
+    expandedHunks: instance?.options?.expandUnchanged === true
+      ? true
+      : instance?.hunksRenderer?.getExpandedHunksMap?.(),
+    collapsedContextThreshold: instance?.options?.collapsedContextThreshold
+      ?? DEFAULT_COLLAPSED_CONTEXT_THRESHOLD,
+  };
+}
+
+function expandedContextSignature() {
+  const fileSignatures = [];
+  for (const file of state.files) {
+    const expandedContext = expandedContextForFile(file);
+    if (!expandedContext) {
+      continue;
+    }
+    fileSignatures.push([
+      file.reviewId,
+      expandedContext.collapsedContextThreshold,
+      expandedHunksSignature(expandedContext.expandedHunks),
+    ].join(":"));
+  }
+  return fileSignatures.join("|");
+}
+
+function expandedHunksSignature(expandedHunks) {
+  if (expandedHunks === true) {
+    return "*";
+  }
+  return [...(expandedHunks || [])]
+    .map(([hunkIndex, region]) => [
+      hunkIndex,
+      region?.fromStart || 0,
+      region?.fromEnd || 0,
+    ].join(","))
+    .sort()
+    .join(";");
+}
+
+function* searchLeadingContext(file, hunk, hunkIndex, expandedContext, seen) {
+  if (!expandedContext) {
+    return;
+  }
+  const rangeSize = Math.max(hunk.collapsedBefore || 0, 0);
+  const region = expandedRegion(rangeSize, hunkIndex, expandedContext);
+  const startLine = hunk.additionStart - rangeSize;
+  const sourceIndex = hunk.additionLineIndex - rangeSize;
+
+  yield* searchLineRange(
+    file,
+    "additions",
+    startLine,
+    file.additionLines,
+    sourceIndex,
+    region.fromStart,
+    seen,
+  );
+
+  const hiddenCount = rangeSize - region.fromStart - region.fromEnd;
+  const hiddenOptions = hiddenLineOptionsFor(hiddenRangeExpansion(
+    hunkIndex,
+    rangeSize,
+    region.fromStart,
+    region.fromEnd,
+    hunkIndex === 0 ? "down" : undefined,
+  ));
+  yield* searchLineRange(
+    file,
+    "additions",
+    startLine + region.fromStart,
+    file.additionLines,
+    sourceIndex + region.fromStart,
+    hiddenCount,
+    seen,
+    hiddenOptions,
+  );
+
+  yield* searchLineRange(
+    file,
+    "additions",
+    hunk.additionStart - region.fromEnd,
+    file.additionLines,
+    hunk.additionLineIndex - region.fromEnd,
+    region.fromEnd,
+    seen,
+  );
+}
+
+function* searchTrailingContext(file, expandedContext, seen) {
+  if (!expandedContext) {
+    return;
+  }
+  const finalHunk = file.hunks?.at(-1);
+  if (!finalHunk || !hasSearchableLines(file.additionLines) || !hasSearchableLines(file.deletionLines)) {
+    return;
+  }
+  const rangeSize = trailingContextRangeSize(file, finalHunk);
+  const expandedLines = trailingExpandedCount(rangeSize, file.hunks.length, expandedContext);
+  const startLine = finalHunk.additionStart + finalHunk.additionCount;
+  const sourceIndex = finalHunk.additionLineIndex + finalHunk.additionCount;
+
+  yield* searchLineRange(
+    file,
+    "additions",
+    startLine,
+    file.additionLines,
+    sourceIndex,
+    expandedLines,
+    seen,
+  );
+  const hiddenOptions = hiddenLineOptionsFor(hiddenRangeExpansion(
+    file.hunks.length,
+    rangeSize,
+    expandedLines,
+    0,
+    "up",
+  ));
+  yield* searchLineRange(
+    file,
+    "additions",
+    startLine + expandedLines,
+    file.additionLines,
+    sourceIndex + expandedLines,
+    rangeSize - expandedLines,
+    seen,
+    hiddenOptions,
+  );
+}
+
+function trailingContextRangeSize(file, finalHunk) {
+  const additionRemaining = file.additionLines.length
+    - (finalHunk.additionLineIndex + finalHunk.additionCount);
+  const deletionRemaining = file.deletionLines.length
+    - (finalHunk.deletionLineIndex + finalHunk.deletionCount);
+  return Math.max(Math.min(additionRemaining, deletionRemaining), 0);
+}
+
+function trailingExpandedCount(rangeSize, hunkIndex, expandedContext) {
+  const normalizedRangeSize = Math.max(rangeSize, 0);
+  if (normalizedRangeSize === 0) {
+    return 0;
+  }
+  if (
+    expandedContext.expandedHunks === true
+    || normalizedRangeSize <= expandedContext.collapsedContextThreshold
+  ) {
+    return normalizedRangeSize;
+  }
+  return clampExpandedCount(
+    expandedContext.expandedHunks?.get(hunkIndex)?.fromStart,
+    normalizedRangeSize,
+  );
+}
+
+function expandedRegion(rangeSize, hunkIndex, expandedContext) {
+  const normalizedRangeSize = Math.max(rangeSize, 0);
+  if (normalizedRangeSize === 0) {
+    return { fromStart: 0, fromEnd: 0 };
+  }
+  if (
+    expandedContext.expandedHunks === true
+    || normalizedRangeSize <= expandedContext.collapsedContextThreshold
+  ) {
+    return { fromStart: normalizedRangeSize, fromEnd: 0 };
+  }
+
+  const region = expandedContext.expandedHunks?.get(hunkIndex);
+  const fromStart = clampExpandedCount(region?.fromStart, normalizedRangeSize);
+  const fromEnd = clampExpandedCount(region?.fromEnd, normalizedRangeSize);
+  if (fromStart + fromEnd >= normalizedRangeSize) {
+    return { fromStart: normalizedRangeSize, fromEnd: 0 };
+  }
+  return { fromStart, fromEnd };
+}
+
+function clampExpandedCount(value, rangeSize) {
+  return Math.min(Math.max(value || 0, 0), rangeSize);
+}
+
+function* searchSideLines(file, side, lines, seen) {
+  for (let index = 0; index < (lines?.length || 0); index += 1) {
+    yield* searchLineOnce(file, side, index + 1, lines[index], seen);
   }
 }
 
-function* searchLineRange(file, side, startLine, sourceLines, sourceIndex, count) {
+function* searchLineRange(
+  file,
+  side,
+  startLine,
+  sourceLines,
+  sourceIndex,
+  count,
+  seen,
+  optionsForOffset = emptyLineOptions,
+) {
   for (let offset = 0; offset < count; offset += 1) {
-    yield searchLine(
+    yield* searchLineOnce(
       file,
       side,
       startLine + offset,
       sourceLines?.[sourceIndex + offset],
+      seen,
+      optionsForOffset(offset),
     );
   }
 }
 
-function searchLine(file, side, lineNumber, text) {
+function emptyLineOptions() {
+  return undefined;
+}
+
+function hiddenRangeExpansion(expandIndex, rangeSize, fromStart, fromEnd, direction) {
+  return {
+    expandIndex,
+    direction,
+    rangeSize,
+    fromStart,
+    fromEnd,
+  };
+}
+
+function hiddenLineOptionsFor(expansion) {
+  return (offset) => {
+    const absoluteOffset = expansion.fromStart + offset;
+    const fromStartLineCount = absoluteOffset + 1;
+    const fromEndLineCount = expansion.rangeSize - absoluteOffset;
+    const fromStartExpansion = Math.max(fromStartLineCount - expansion.fromStart, 1);
+    const fromEndExpansion = Math.max(fromEndLineCount - expansion.fromEnd, 1);
+    const expandDirection = expansion.direction
+      ?? (fromStartExpansion <= fromEndExpansion ? "up" : "down");
+    return {
+      hidden: true,
+      expandIndex: expansion.expandIndex,
+      expandDirection,
+      expandLineCount: expandDirection === "up" ? fromStartExpansion : fromEndExpansion,
+    };
+  };
+}
+
+function* searchLineOnce(file, side, lineNumber, text, seen, options = {}) {
+  const key = `${side}:${lineNumber}`;
+  if (seen.has(key)) {
+    return;
+  }
+  seen.add(key);
+  yield searchLine(file, side, lineNumber, text, options);
+}
+
+function searchLine(file, side, lineNumber, text, options = {}) {
   return {
     path: file.reviewId,
     fileName: file.name,
     side,
     lineNumber,
     text: trimLineEnding(String(text ?? "")),
+    ...options,
   };
 }
 
@@ -385,40 +688,57 @@ function applyCurrentSearchHighlight() {
 
 function nextSearchHighlight(current) {
   const textMatches = renderedTextMatches(current);
-  const lineElements = findRenderedLineElements(current);
-  if (!textMatches.some((match) => match.current) && lineElements.length === 0) {
+  const lineHighlights = findRenderedLineElements(current)
+    .map((element) => ({ element, current: true }));
+  if (!textMatches.some((match) => match.current) && lineHighlights.length === 0) {
     return undefined;
   }
-  return { textMatches, lineElements };
+  return { textMatches, lineHighlights };
 }
 
 function updateRenderedSearchHighlight(nextHighlight) {
   withDiffObserverPaused(() => {
     clearRenderedSearchHighlight();
     applyTextSearchHighlights(nextHighlight.textMatches);
-    applyLineOutlines(nextHighlight.lineElements);
+    applyLineHighlights(nextHighlight.lineHighlights);
   });
 }
 
-function applyLineOutlines(elements) {
-  for (const element of elements) {
-    outlinedLines.push({
+function applyLineHighlights(highlights) {
+  for (const highlight of highlights) {
+    const { element } = highlight;
+    renderedLineHighlights.push({
       element,
-      boxShadow: element.style.boxShadow,
-      backgroundColor: element.style.backgroundColor,
+      style: element.getAttribute("style"),
     });
-    element.style.boxShadow = LINE_OUTLINE_SHADOW;
-    element.style.backgroundColor = LINE_OUTLINE_BACKGROUND;
+    styleLineHighlight(highlight);
+  }
+}
+
+function styleLineHighlight(highlight) {
+  const backgroundColor = highlight.current
+    ? CURRENT_LINE_OUTLINE_BACKGROUND
+    : LINE_OUTLINE_BACKGROUND;
+  highlight.element.style.backgroundColor = backgroundColor;
+  if (highlight.current) {
+    highlight.element.style.boxShadow = LINE_OUTLINE_SHADOW;
   }
 }
 
 function clearRenderedSearchHighlight() {
   clearTextSearchHighlights();
-  for (const { element, boxShadow, backgroundColor } of outlinedLines) {
-    element.style.boxShadow = boxShadow;
-    element.style.backgroundColor = backgroundColor;
+  for (const { element, style } of renderedLineHighlights) {
+    restoreStyle(element, style);
   }
-  outlinedLines = [];
+  renderedLineHighlights = [];
+}
+
+function restoreStyle(element, style) {
+  if (style == null) {
+    element.removeAttribute("style");
+  } else {
+    element.setAttribute("style", style);
+  }
 }
 
 function observeDiffMutations() {
@@ -427,11 +747,27 @@ function observeDiffMutations() {
   }
 
   diffObserver = new MutationObserver(() => {
+    if (state.search.open && refreshSearchForExpandedContext()) {
+      return;
+    }
     if (state.search.open && currentSearchMatch()) {
       applyCurrentSearchHighlight();
     }
   });
   diffObserver.observe(els.diff, { childList: true, subtree: true });
+}
+
+function refreshSearchForExpandedContext() {
+  if (state.search.query.length === 0) {
+    return false;
+  }
+  const signature = expandedContextSignature();
+  if (signature === indexedExpandedContext) {
+    return false;
+  }
+  const shouldJump = !currentSearchMatch();
+  setSearchQuery(state.search.query, { preserveCurrent: true, jump: shouldJump });
+  return true;
 }
 
 function withDiffObserverPaused(callback) {
@@ -448,6 +784,9 @@ function withDiffObserverPaused(callback) {
 }
 
 function findRenderedLineElements(match) {
+  if (match.hidden) {
+    return [];
+  }
   return findRenderedContentLineElements(match).filter((element) => (
     isElementTextMatch(element, match)
   ));
@@ -472,6 +811,9 @@ function applyTextSearchHighlights(matches) {
 function renderedTextMatches(current) {
   const matches = [];
   for (const match of state.search.matches) {
+    if (match.hidden) {
+      continue;
+    }
     const lineElements = findRenderedContentLineElements(match);
     for (const element of lineElements) {
       if (!isElementTextMatch(element, match)) {
