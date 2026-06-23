@@ -3,9 +3,10 @@ use std::net::SocketAddr;
 use std::path::PathBuf;
 
 use anyhow::{Context, Result, bail};
-use clap::{ArgAction, Parser};
+use clap::parser::ValueSource;
+use clap::{ArgAction, CommandFactory, FromArgMatches, Parser};
 
-const DEFAULT_PORT: u16 = 7527;
+const DEFAULT_LISTEN_ADDR: &str = "127.0.0.1:7527";
 
 #[derive(Clone, Debug)]
 pub struct CliOptions {
@@ -19,41 +20,66 @@ pub struct CliOptions {
 }
 
 #[derive(Debug, Parser)]
-#[command(author, version, about)]
+#[command(
+    author = env!("CARGO_PKG_AUTHORS"),
+    version = env!("CARGO_PKG_VERSION"),
+    about = env!("CARGO_PKG_DESCRIPTION"),
+    long_about = None
+)]
 struct Args {
-    #[arg(long = "addr", value_name = "ADDR")]
-    addr: Option<SocketAddr>,
-    #[arg(long = "port", value_name = "PORT")]
+    #[arg(
+        long = "addr",
+        value_name = "ADDR",
+        default_value = DEFAULT_LISTEN_ADDR,
+        help = "Serve the review UI on this address"
+    )]
+    addr: SocketAddr,
+    #[arg(long = "port", value_name = "PORT", help = "Serve on 127.0.0.1:<PORT>")]
     port: Option<u16>,
-    #[arg(short = 'r', value_name = "REVSET", action = ArgAction::Append)]
+    #[arg(
+        short = 'r',
+        value_name = "REVSET",
+        action = ArgAction::Append,
+        conflicts_with_all = ["from_rev", "to_rev"],
+        help = "Review a jj revset, or one Git commit",
+    )]
     revisions: Vec<String>,
-    #[arg(long = "from", value_name = "REV")]
+    #[arg(
+        long = "from",
+        value_name = "REV",
+        help = "Old revision for a range review"
+    )]
     from_rev: Option<String>,
-    #[arg(long = "to", value_name = "REV")]
+    #[arg(
+        long = "to",
+        value_name = "REV",
+        help = "New revision for a range review"
+    )]
     to_rev: Option<String>,
-    #[arg(value_name = "PATH")]
+    #[arg(value_name = "PATH", help = "Limit review to these paths")]
     paths: Vec<String>,
 }
 
 pub fn parse() -> Result<CliOptions> {
-    let args = Args::parse();
-    if args.addr.is_some() && args.port.is_some() {
+    let matches = Args::command().get_matches();
+    let addr_source = matches.value_source("addr");
+    let port_source = matches.value_source("port");
+    let args = Args::from_arg_matches(&matches).unwrap_or_else(|err| err.exit());
+
+    if addr_source == Some(ValueSource::CommandLine)
+        && port_source == Some(ValueSource::CommandLine)
+    {
         bail!("use --addr or --port, not both");
     }
-    if !args.revisions.is_empty() && (args.from_rev.is_some() || args.to_rev.is_some()) {
-        bail!("use -r or --from/--to, not both");
-    }
 
-    let listen_addr = match (args.addr, args.port) {
-        (Some(addr), None) => addr,
-        (None, Some(port)) => SocketAddr::from(([127, 0, 0, 1], port)),
-        (None, None) => SocketAddr::from(([127, 0, 0, 1], DEFAULT_PORT)),
-        (Some(_), Some(_)) => unreachable!("checked above"),
-    };
+    let listen_addr = args
+        .port
+        .map_or(args.addr, |port| SocketAddr::from(([127, 0, 0, 1], port)));
 
     Ok(CliOptions {
         listen_addr,
-        allow_port_fallback: args.addr.is_none() && args.port.is_none(),
+        allow_port_fallback: addr_source == Some(ValueSource::DefaultValue)
+            && port_source.is_none(),
         cwd: env::current_dir().context("read current directory")?,
         revisions: trim_required_values(args.revisions, "revision")?,
         from_rev: trim_optional(args.from_rev),
