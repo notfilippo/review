@@ -1,4 +1,3 @@
-import "./style.css";
 import {
   DIFF_STYLE_SPLIT,
   DIFF_STYLE_STORAGE_KEY,

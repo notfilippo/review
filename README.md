@@ -7,17 +7,8 @@ review comments as Markdown when you click Done.
 
 ## Install
 
-The source branch does not commit built frontend assets. Install from the
-generated `install` branch:
-
 ```sh
-go install github.com/notfilippo/review@install
-```
-
-If a Go proxy serves a stale branch tip or your proxy is unreachable, bypass it:
-
-```sh
-GOPROXY=direct go install github.com/notfilippo/review@install
+go install github.com/notfilippo/review@latest
 ```
 
 ## Usage
@@ -45,10 +36,5 @@ Run `review -help` for all flags.
 ## Development
 
 ```sh
-pnpm install
-pnpm build
 go run .
 ```
-
-`pnpm build` writes generated assets to `internal/static`. Those assets are
-ignored on the source branch and published by CI to the `install` branch.

@@ -18,8 +18,8 @@ const (
 	commentKindRange = "range"
 )
 
-//go:embed internal/static
-var embeddedStatic embed.FS
+//go:embed internal/frontend
+var embeddedFrontend embed.FS
 
 type ReviewComment struct {
 	ID        string `json:"id"`
@@ -92,20 +92,23 @@ func newToken() (string, error) {
 }
 
 func (s *reviewSession) routes() http.Handler {
-	staticRoot, err := fs.Sub(embeddedStatic, "internal/static")
+	frontendRoot, err := fs.Sub(embeddedFrontend, "internal/frontend")
+	if err != nil {
+		panic(err)
+	}
+	sourceRoot, err := fs.Sub(frontendRoot, "src")
 	if err != nil {
 		panic(err)
 	}
 
 	mux := http.NewServeMux()
-	staticHandler := http.FileServer(http.FS(staticRoot))
-	mux.Handle("/static/", http.StripPrefix("/static/", staticHandler))
+	mux.Handle("/src/", http.StripPrefix("/src/", http.FileServer(http.FS(sourceRoot))))
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/" {
 			http.NotFound(w, r)
 			return
 		}
-		http.ServeFileFS(w, r, staticRoot, "index.html")
+		http.ServeFileFS(w, r, frontendRoot, "index.html")
 	})
 	mux.HandleFunc("/api/session", s.handleSession)
 	mux.HandleFunc("/api/comments", s.handleComments)

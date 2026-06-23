@@ -1,10 +1,10 @@
-import DiffsWorker from "@pierre/diffs/worker/worker.js?worker";
 import {
   DIFF_BOTTOM_PADDING_REM,
   DIFF_THEME,
   NEXT_FILE_KEYS,
   PREVIOUS_FILE_KEYS,
 } from "./constants.js";
+import createDiffsWorker from "https://esm.sh/@pierre/diffs@1.2.11/worker/worker-portable.js?worker";
 import {
   annotationsForPath,
   applyActiveSelection,
@@ -83,7 +83,7 @@ export function createDiffWorkerManager(getOrCreateWorkerPoolSingleton, files, g
   try {
     return getOrCreateWorkerPoolSingleton({
       poolOptions: {
-        workerFactory: () => new DiffsWorker(),
+        workerFactory: () => createDiffsWorker(),
       },
       highlighterOptions: {
         theme: DIFF_THEME,
