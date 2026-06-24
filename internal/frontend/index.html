@@ -25,7 +25,6 @@
           <span id="status">Loading</span>
         </div>
         <div class="actions">
-          <span id="comment-summary" class="comment-summary">0 comments</span>
           <button id="search-toggle" class="icon-button" type="button" aria-pressed="false" aria-label="Search diff" title="Search diff"></button>
           <button id="layout-toggle" class="icon-button" type="button" aria-label="Switch to unified diff" title="Switch to unified diff"></button>
           <button id="collapse-toggle" class="icon-button" type="button" aria-label="Collapse all files" title="Collapse all files"></button>
@@ -42,7 +41,15 @@
       <main class="workspace">
         <div id="tree-backdrop" class="tree-backdrop" aria-hidden="true"></div>
         <aside class="sidebar">
-          <div id="tree" class="tree"></div>
+          <div class="sidebar-tabs" role="tablist" aria-label="Sidebar views">
+            <button id="files-tab" class="sidebar-tab" type="button" role="tab" aria-selected="true" aria-controls="tree">Files</button>
+            <button id="comments-tab" class="sidebar-tab" type="button" role="tab" aria-selected="false" aria-controls="comment-nav">
+              <span>Comments</span>
+              <span id="comment-nav-summary" class="tab-count">0</span>
+            </button>
+          </div>
+          <div id="tree" class="tree sidebar-tab-panel" role="tabpanel" aria-labelledby="files-tab"></div>
+          <div id="comment-nav" class="comment-nav sidebar-tab-panel" role="tabpanel" aria-labelledby="comments-tab" hidden></div>
           <div class="sidebar-panels">
             <details class="sidebar-pane" open>
               <summary>

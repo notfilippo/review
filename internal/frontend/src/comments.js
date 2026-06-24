@@ -4,7 +4,7 @@ import { renderDiffs, setCurrentPath } from "./diff-view.js";
 import { setIconButton } from "./icons.js";
 import { fileCommentKey } from "./patch-files.js";
 import { els, state } from "./state.js";
-import { stopDiffEvents } from "./util.js";
+import { isEditableTarget, stopDiffEvents } from "./util.js";
 
 export function annotationsForFile(file) {
   const comments = state.comments.filter((comment) => sameFileComment(comment, file));
@@ -26,6 +26,7 @@ export function startDraft(reviewId, range) {
   const normalized = normalizeRange(range);
   setCurrentPath(reviewId, { scrollDiff: false, selectTree: true });
   clearActiveComment();
+  state.selectedCommentId = "";
   state.draft = {
     id: `draft-${crypto.randomUUID()}`,
     path: file.name,
@@ -83,6 +84,7 @@ export function createAnnotationCard(comment) {
   edit.addEventListener("click", () => {
     state.draft = null;
     state.editingId = comment.id;
+    state.selectedCommentId = comment.id;
     clearHoveredComment();
     renderDiffs();
   });
@@ -173,12 +175,16 @@ async function deleteComment(id) {
   if (state.hoveredCommentId === id) {
     clearHoveredComment();
   }
+  if (state.selectedCommentId === id) {
+    state.selectedCommentId = "";
+  }
   renderDiffs();
   await saveComments();
 }
 
 export function clearActiveComment() {
   state.editingId = "";
+  state.selectedCommentId = "";
   clearHoveredComment();
 }
 
@@ -200,7 +206,7 @@ function activeSelectionComment() {
   if (state.draft) {
     return state.draft;
   }
-  const id = state.editingId || state.hoveredCommentId;
+  const id = state.editingId || state.hoveredCommentId || state.selectedCommentId;
   return id ? state.comments.find((comment) => comment.id === id) : undefined;
 }
 
@@ -228,7 +234,10 @@ export function applyActiveSelection() {
 
 export function syncCommentSummary() {
   const count = state.comments.length;
-  els.commentSummary.textContent = `${count} comment${count === 1 ? "" : "s"}`;
+  if (els.commentSummary) {
+    els.commentSummary.textContent = `${count} comment${count === 1 ? "" : "s"}`;
+  }
+  renderCommentNavigator();
 }
 
 export async function saveComments() {
@@ -237,6 +246,24 @@ export async function saveComments() {
     body: JSON.stringify({ comments: state.comments }),
   });
   syncCommentSummary();
+}
+
+export function handleCommentShortcut(event) {
+  if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey || isEditableTarget(event.target)) {
+    return false;
+  }
+  const key = event.key.toLowerCase();
+  if (key === "n") {
+    event.preventDefault();
+    moveComment(1);
+    return true;
+  }
+  if (key === "p") {
+    event.preventDefault();
+    moveComment(-1);
+    return true;
+  }
+  return false;
 }
 
 function normalizeRange(range) {
@@ -287,4 +314,139 @@ function rangeLabel(comment) {
     return `${side} line ${comment.start_line}`;
   }
   return `${side} lines ${comment.start_line}-${comment.end_line}`;
+}
+
+function renderCommentNavigator() {
+  if (!els.commentNavigator || !els.commentNavigatorSummary) {
+    return;
+  }
+
+  const comments = orderedComments();
+  const count = comments.length;
+  els.commentNavigatorSummary.textContent = String(count);
+  els.commentNavigator.replaceChildren();
+
+  if (count === 0) {
+    const empty = document.createElement("p");
+    empty.className = "comment-nav-empty";
+    empty.textContent = "No comments yet.";
+    els.commentNavigator.append(empty);
+    return;
+  }
+
+  const list = document.createElement("div");
+  list.className = "comment-nav-list";
+  for (const comment of comments) {
+    list.append(createCommentNavItem(comment));
+  }
+  els.commentNavigator.append(list);
+}
+
+function createCommentNavItem(comment) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "comment-nav-item";
+  button.dataset.active = String(comment.id === activeCommentId());
+  button.addEventListener("click", () => {
+    jumpToComment(comment.id);
+  });
+
+  const meta = document.createElement("span");
+  meta.className = "comment-nav-meta";
+
+  const path = document.createElement("span");
+  path.className = "comment-nav-path";
+  path.textContent = comment.path;
+
+  const line = document.createElement("span");
+  line.className = "comment-nav-line";
+  line.textContent = rangeLabel(comment);
+
+  const text = document.createElement("span");
+  text.className = "comment-nav-text";
+  text.textContent = commentSnippet(comment.text);
+
+  meta.append(path, line);
+  button.append(meta, text);
+  return button;
+}
+
+function commentSnippet(text) {
+  const singleLine = text.trim().replace(/\s+/g, " ");
+  if (singleLine.length <= 120) {
+    return singleLine;
+  }
+  return `${singleLine.slice(0, 117)}...`;
+}
+
+function activeCommentId() {
+  return state.editingId || state.hoveredCommentId || state.selectedCommentId;
+}
+
+function orderedComments() {
+  const fileOrder = new Map(state.files.map((file, index) => [file.reviewId, index]));
+  return [...state.comments].sort((left, right) => {
+    const leftFile = fileOrder.get(reviewIdForComment(left)) ?? Number.MAX_SAFE_INTEGER;
+    const rightFile = fileOrder.get(reviewIdForComment(right)) ?? Number.MAX_SAFE_INTEGER;
+    if (leftFile !== rightFile) {
+      return leftFile - rightFile;
+    }
+    if (left.start_line !== right.start_line) {
+      return left.start_line - right.start_line;
+    }
+    if (left.end_line !== right.end_line) {
+      return left.end_line - right.end_line;
+    }
+    return left.id.localeCompare(right.id);
+  });
+}
+
+function moveComment(delta) {
+  const comments = orderedComments();
+  if (comments.length === 0) {
+    return;
+  }
+
+  const id = activeCommentId();
+  const index = comments.findIndex((comment) => comment.id === id);
+  const nextIndex = index < 0
+    ? (delta < 0 ? comments.length - 1 : 0)
+    : (index + delta + comments.length) % comments.length;
+  jumpToComment(comments[nextIndex].id);
+}
+
+function jumpToComment(id) {
+  const comment = findAnnotationComment(id);
+  if (!comment) {
+    return;
+  }
+  const reviewId = reviewIdForComment(comment);
+  if (!reviewId) {
+    return;
+  }
+
+  state.selectedCommentId = comment.id;
+  state.editingId = "";
+  clearHoveredComment();
+
+  if (state.collapsedFiles.has(reviewId)) {
+    state.collapsedFiles.delete(reviewId);
+    renderDiffs();
+  } else {
+    applyActiveSelection();
+    renderCommentNavigator();
+  }
+
+  if (!state.codeView) {
+    return;
+  }
+  setCurrentPath(reviewId, { scrollDiff: false, selectTree: true });
+  state.codeView.scrollTo({
+    type: "line",
+    id: reviewId,
+    lineNumber: annotationLine(comment),
+    side: annotationSide(comment),
+    align: "center",
+    behavior: "instant",
+  });
 }

@@ -46,6 +46,23 @@ export function syncCollapseToggle() {
   );
 }
 
+export function setupSidebarTabs() {
+  els.filesTab.addEventListener("click", () => setSidebarTab("files"));
+  els.commentsTab.addEventListener("click", () => setSidebarTab("comments"));
+  setSidebarTab(state.sidebarTab);
+}
+
+export function setSidebarTab(tab) {
+  const nextTab = tab === "comments" ? "comments" : "files";
+  state.sidebarTab = nextTab;
+  const commentsActive = nextTab === "comments";
+
+  els.filesTab.setAttribute("aria-selected", String(!commentsActive));
+  els.commentsTab.setAttribute("aria-selected", String(commentsActive));
+  els.tree.hidden = commentsActive;
+  els.commentNavigator.hidden = !commentsActive;
+}
+
 export function bindSidebarResizer() {
   els.sidebarResizer.addEventListener("pointerdown", (event) => {
     if (isNarrowViewport()) {

@@ -4,7 +4,7 @@ import {
   DIFF_STYLE_UNIFIED,
 } from "./constants.js";
 import { requestJSON } from "./api.js";
-import { clearActiveComment, syncCommentSummary } from "./comments.js";
+import { clearActiveComment, handleCommentShortcut, syncCommentSummary } from "./comments.js";
 import {
   bindWorkerCleanup,
   codeViewOptions,
@@ -23,6 +23,8 @@ import {
   bindSidebarResizer,
   isNarrowViewport,
   restoreSidebarWidth,
+  setSidebarTab,
+  setupSidebarTabs,
   setTreeCollapsed,
   syncCollapseToggle,
   syncLayoutToggle,
@@ -108,6 +110,7 @@ function bindActions() {
   setIconButton(els.done, "Check", "Finish review");
   syncLayoutToggle();
   syncCollapseToggle();
+  setupSidebarTabs();
   setupSearch();
   restoreSidebarWidth();
   setTreeCollapsed(isNarrowViewport());
@@ -133,6 +136,10 @@ function bindActions() {
     }
     if (event.key === "Escape" && isNarrowViewport() && !state.treeCollapsed) {
       setTreeCollapsed(true);
+      return;
+    }
+    if (handleCommentShortcut(event)) {
+      setSidebarTab("comments");
       return;
     }
     handleFileShortcut(event);
