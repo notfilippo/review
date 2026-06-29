@@ -1,27 +1,21 @@
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
+use std::process::Command;
 use std::sync::Arc;
 
 use anyhow::{Context, Result, bail};
-use chrono::Local;
 use futures_util::StreamExt;
 use futures_util::io::AsyncReadExt;
-use jj_lib::backend::TreeValue;
+use jj_lib::backend::{CommitId, TreeValue};
 use jj_lib::commit::Commit;
 use jj_lib::config::StackedConfig;
-use jj_lib::fileset::FilesetAliasesMap;
 use jj_lib::matchers::EverythingMatcher;
 use jj_lib::merged_tree::MergedTree;
 use jj_lib::object_id::ObjectId;
 use jj_lib::repo::{ReadonlyRepo, Repo, StoreFactories};
-use jj_lib::repo_path::{RepoPath, RepoPathUiConverter};
-use jj_lib::revset::{
-    RevsetAliasesMap, RevsetDiagnostics, RevsetExtensions, RevsetParseContext, RevsetStreamExt,
-    RevsetWorkspaceContext, SymbolResolver,
-};
+use jj_lib::repo_path::RepoPath;
 use jj_lib::rewrite::merge_commit_trees;
 use jj_lib::settings::UserSettings;
-use jj_lib::time_util::DatePatternContext;
 use jj_lib::workspace::{Workspace, default_working_copy_factories};
 
 use crate::cli::CliOptions;
@@ -42,50 +36,97 @@ pub async fn load_review_input(
     )
     .with_context(|| format!("load jj workspace {}", root.display()))?;
     let repo = workspace.repo_loader().load_at_head().await?;
-    let path_converter = RepoPathUiConverter::Fs {
-        cwd: options.cwd.clone(),
-        base: workspace.workspace_root().to_path_buf(),
-    };
 
     match (
         &options.from_rev,
         &options.to_rev,
         options.revisions.as_slice(),
     ) {
-        (None, None, []) => revset_change(&repo, &workspace, &path_converter, "@", paths).await,
+        (None, None, []) => revset_change(&repo, root, &options.cwd, "@", paths).await,
         (None, None, revisions) => {
             let expression = combine_revsets(revisions);
-            revset_change(&repo, &workspace, &path_converter, &expression, paths).await
+            revset_change(&repo, root, &options.cwd, &expression, paths).await
         }
         (from_rev, to_rev, []) => {
             let from = resolve_single(
                 &repo,
-                &workspace,
-                &path_converter,
+                root,
+                &options.cwd,
                 from_rev.as_deref().unwrap_or("@-"),
             )
             .await?;
-            let to = resolve_single(
-                &repo,
-                &workspace,
-                &path_converter,
-                to_rev.as_deref().unwrap_or("@"),
-            )
-            .await?;
+            let to =
+                resolve_single(&repo, root, &options.cwd, to_rev.as_deref().unwrap_or("@")).await?;
             change_between(&from.tree(), &to.tree(), paths).await
         }
         _ => unreachable!("CLI rejects combining revisions with from/to"),
     }
 }
 
+fn resolve_revset_with_jj(root: &Path, cwd: &Path, expression: &str) -> Result<Vec<CommitId>> {
+    let output = Command::new("jj")
+        .arg("--no-pager")
+        .arg("--color=never")
+        .arg("--quiet")
+        .arg("--no-integrate-operation")
+        .arg("-R")
+        .arg(root)
+        .arg("log")
+        .arg("--no-graph")
+        .arg("-r")
+        .arg(expression)
+        .arg("-T")
+        .arg("commit_id ++ \"\\n\"")
+        .current_dir(cwd)
+        .output()
+        .with_context(|| format!("resolve jj revset {expression:?} in {}", cwd.display()))?;
+    if !output.status.success() {
+        return Err(jj_command_error(
+            "jj log",
+            output.status,
+            &output.stdout,
+            &output.stderr,
+        ));
+    }
+
+    String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .map(|line| {
+            CommitId::try_from_hex(line)
+                .with_context(|| format!("jj log returned invalid commit id {line:?}"))
+        })
+        .collect()
+}
+
+fn jj_command_error(
+    command: &str,
+    status: std::process::ExitStatus,
+    stdout: &[u8],
+    stderr: &[u8],
+) -> anyhow::Error {
+    let stdout = String::from_utf8_lossy(stdout);
+    let stderr = String::from_utf8_lossy(stderr);
+    let details = [stderr.trim(), stdout.trim()]
+        .into_iter()
+        .filter(|text| !text.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n");
+    if details.is_empty() {
+        return anyhow::anyhow!("{command} failed with {status}");
+    }
+    anyhow::anyhow!("{command} failed with {status}:\n{details}")
+}
+
 async fn revset_change(
     repo: &Arc<ReadonlyRepo>,
-    workspace: &Workspace,
-    path_converter: &RepoPathUiConverter,
+    root: &Path,
+    cwd: &Path,
     expression: &str,
     paths: &[String],
 ) -> Result<ReviewInput> {
-    let commits = resolve_revset(repo, workspace, path_converter, expression).await?;
+    let commits = resolve_revset(repo, root, cwd, expression).await?;
     let target = revset_diff_target(repo, commits, expression).await?;
     change_between(&target.from, &target.to, paths).await
 }
@@ -277,11 +318,11 @@ fn combine_revsets(revisions: &[String]) -> String {
 
 async fn resolve_single(
     repo: &Arc<ReadonlyRepo>,
-    workspace: &Workspace,
-    path_converter: &RepoPathUiConverter,
+    root: &Path,
+    cwd: &Path,
     expression: &str,
 ) -> Result<Commit> {
-    let commits = resolve_revset(repo, workspace, path_converter, expression).await?;
+    let commits = resolve_revset(repo, root, cwd, expression).await?;
     match commits.as_slice() {
         [commit] => Ok(commit.clone()),
         [] => bail!("revset {expression:?} resolved to no commits"),
@@ -294,45 +335,15 @@ async fn resolve_single(
 
 async fn resolve_revset(
     repo: &Arc<ReadonlyRepo>,
-    workspace: &Workspace,
-    path_converter: &RepoPathUiConverter,
+    root: &Path,
+    cwd: &Path,
     expression: &str,
 ) -> Result<Vec<Commit>> {
-    let aliases_map = RevsetAliasesMap::new();
-    let fileset_aliases_map = FilesetAliasesMap::new();
-    let extensions = RevsetExtensions::default();
-    let workspace_context = RevsetWorkspaceContext {
-        path_converter,
-        workspace_name: workspace.workspace_name(),
-    };
-    let context = RevsetParseContext {
-        aliases_map: &aliases_map,
-        local_variables: HashMap::new(),
-        user_email: repo.settings().user_email(),
-        date_pattern_context: DatePatternContext::Local(Local::now()),
-        default_ignored_remote: None,
-        fileset_aliases_map: &fileset_aliases_map,
-        use_glob_by_default: false,
-        extensions: &extensions,
-        workspace: Some(workspace_context),
-    };
-    let mut diagnostics = RevsetDiagnostics::new();
-    let parsed = jj_lib::revset::parse(&mut diagnostics, expression, &context)
-        .with_context(|| format!("parse revset {expression:?}"))?;
-    let symbol_resolver = SymbolResolver::new(repo.as_ref(), extensions.symbol_resolvers());
-    let resolved = parsed
-        .resolve_user_expression(repo.as_ref(), &symbol_resolver)
-        .with_context(|| format!("resolve revset {expression:?}"))?;
-    let revset = resolved
-        .evaluate(repo.as_ref())
-        .with_context(|| format!("evaluate revset {expression:?}"))?;
-    let commits = revset
-        .stream()
-        .commits(repo.store())
-        .collect::<Vec<_>>()
-        .await
-        .into_iter()
-        .collect::<Result<Vec<_>, _>>()?;
+    let commit_ids = resolve_revset_with_jj(root, cwd, expression)?;
+    let mut commits = Vec::with_capacity(commit_ids.len());
+    for commit_id in commit_ids {
+        commits.push(repo.store().get_commit_async(&commit_id).await?);
+    }
     Ok(commits)
 }
 
