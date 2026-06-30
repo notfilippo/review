@@ -42,7 +42,11 @@ pub async fn load_review_input(
         &options.to_rev,
         options.revisions.as_slice(),
     ) {
-        (None, None, []) => revset_change(&repo, root, &options.cwd, "@", paths).await,
+        (None, None, []) => {
+            let from = resolve_single(&repo, root, &options.cwd, "trunk()").await?;
+            let to = resolve_single(&repo, root, &options.cwd, "@").await?;
+            change_between(&from.tree(), &to.tree(), paths).await
+        }
         (None, None, revisions) => {
             let expression = combine_revsets(revisions);
             revset_change(&repo, root, &options.cwd, &expression, paths).await

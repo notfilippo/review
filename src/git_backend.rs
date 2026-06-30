@@ -5,8 +5,11 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 
 use anyhow::{Context, Result, bail};
-use gix::bstr::ByteSlice;
+use gix::bstr::{BString, ByteSlice};
+use gix::dir::entry::Kind;
+use gix::dir::walk::EmissionMode;
 use gix::object::tree::EntryMode;
+use gix::remote::Direction;
 
 use crate::cli::CliOptions;
 use crate::diff::{FileDiffInput, FileSnapshot, render_patch};
@@ -30,7 +33,7 @@ pub fn load_review_input(
         &options.to_rev,
         options.revisions.as_slice(),
     ) {
-        (None, None, []) => working_tree_review(&repo, root, paths),
+        (None, None, []) => default_worktree_review(&repo, root, paths),
         (None, None, [revision]) => commit_review(&repo, revision, paths),
         (None, None, revisions) => {
             bail!("git mode supports one -r revision, got {}", revisions.len())
@@ -45,15 +48,25 @@ pub fn load_review_input(
     }
 }
 
-fn working_tree_review(
+fn default_worktree_review(
     repo: &gix::Repository,
     root: &Path,
     paths: &[String],
 ) -> Result<ReviewInput> {
-    let head = repo.head_commit().context("resolve HEAD")?;
-    let old_tree = head.tree().context("read HEAD tree")?;
-    let old_entries = collect_tree_entries(&old_tree, paths)?;
-    let new_entries = collect_worktree_entries(root, paths)?;
+    let head = repo.head().context("resolve HEAD")?;
+    let (old_entries, head_entries) = if head.is_unborn() {
+        (BTreeMap::new(), BTreeMap::new())
+    } else {
+        let head = repo.head_commit().context("resolve HEAD commit")?;
+        let head_entries = collect_tree_entries(&head.tree().context("read HEAD tree")?, paths)?;
+        let old_entries = if let Some(base) = resolve_default_base_commit(repo)? {
+            collect_tree_entries(&base.tree().context("read default branch tree")?, paths)?
+        } else {
+            BTreeMap::new()
+        };
+        (old_entries, head_entries)
+    };
+    let new_entries = collect_worktree_entries(repo, root, head_entries, paths)?;
     let files = compare_entries(&old_entries, &new_entries, paths);
     let patch = render_patch(&files)?;
     Ok(build_review_input(patch, files))
@@ -144,66 +157,105 @@ fn collect_tree_entries_at(
     Ok(())
 }
 
-fn collect_worktree_entries(root: &Path, paths: &[String]) -> Result<BTreeMap<String, FileEntry>> {
-    let mut entries = BTreeMap::new();
-    collect_worktree_entries_at(root, root, "", paths, &mut entries)?;
+fn collect_worktree_entries(
+    repo: &gix::Repository,
+    root: &Path,
+    mut entries: BTreeMap<String, FileEntry>,
+    paths: &[String],
+) -> Result<BTreeMap<String, FileEntry>> {
+    prune_missing_worktree_entries(root, &mut entries)?;
+    overlay_visible_worktree_entries(repo, root, paths, &mut entries)?;
     Ok(entries)
 }
 
-fn collect_worktree_entries_at(
+fn prune_missing_worktree_entries(
     root: &Path,
-    dir: &Path,
-    prefix: &str,
+    entries: &mut BTreeMap<String, FileEntry>,
+) -> Result<()> {
+    let mut removed = Vec::new();
+    for path in entries.keys() {
+        if !worktree_path_is_file(root, path)? {
+            removed.push(path.clone());
+        }
+    }
+    for path in removed {
+        entries.remove(&path);
+    }
+    Ok(())
+}
+
+fn overlay_visible_worktree_entries(
+    repo: &gix::Repository,
+    root: &Path,
     paths: &[String],
     entries: &mut BTreeMap<String, FileEntry>,
 ) -> Result<()> {
-    for entry in fs::read_dir(dir).with_context(|| format!("read {}", dir.display()))? {
-        let entry = entry?;
-        let file_name = entry.file_name().to_string_lossy().to_string();
-        if file_name == ".git" || file_name == ".jj" {
+    let index = repo.index_or_empty()?;
+    let patterns = paths
+        .iter()
+        .map(|path| BString::from(path.as_str()))
+        .collect::<Vec<_>>();
+    let options = repo
+        .dirwalk_options()?
+        .emit_tracked(true)
+        .emit_ignored(None)
+        .emit_untracked(EmissionMode::Matching);
+    let mut iter = repo.dirwalk_iter(index, patterns, Default::default(), options)?;
+    for item in &mut iter {
+        let item = item?;
+        let path = item.entry.rela_path.to_str_lossy().to_string();
+        if !path_allowed(&path, paths) || item.entry.disk_kind == Some(Kind::Directory) {
             continue;
         }
-        let rel = if prefix.is_empty() {
-            file_name
+        if let Some(entry) = read_worktree_file_entry(root, &path)? {
+            entries.insert(path, entry);
         } else {
-            format!("{prefix}/{}", entry.file_name().to_string_lossy())
-        };
-        let path = entry.path();
-        let metadata = fs::symlink_metadata(&path)?;
-        if metadata.is_dir() {
-            if path_may_match_dir(&rel, paths) {
-                collect_worktree_entries_at(root, &path, &rel, paths, entries)?;
-            }
-            continue;
+            entries.remove(&path);
         }
-        if !path_allowed(&rel, paths) {
-            continue;
-        }
-        let (mode, contents) = if metadata.file_type().is_symlink() {
-            (
-                "120000".to_string(),
-                fs::read_link(&path)?
-                    .to_string_lossy()
-                    .to_string()
-                    .into_bytes(),
-            )
-        } else if metadata.is_file() {
-            (worktree_file_mode(&metadata), fs::read(&path)?)
-        } else {
-            continue;
-        };
-        let hash = pseudo_blob_hash(&contents);
-        entries.insert(
-            rel,
-            FileEntry {
-                mode,
-                hash,
-                contents,
-            },
-        );
     }
-    let _ = root;
     Ok(())
+}
+
+fn worktree_path_is_file(root: &Path, path: &str) -> Result<bool> {
+    let full_path = root.join(path);
+    let metadata = match fs::symlink_metadata(&full_path) {
+        Ok(metadata) => metadata,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+        Err(err) => {
+            return Err(err).with_context(|| format!("read metadata for {}", full_path.display()));
+        }
+    };
+    Ok(metadata.file_type().is_symlink() || metadata.is_file())
+}
+
+fn read_worktree_file_entry(root: &Path, path: &str) -> Result<Option<FileEntry>> {
+    let full_path = root.join(path);
+    let metadata = match fs::symlink_metadata(&full_path) {
+        Ok(metadata) => metadata,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(err) => {
+            return Err(err).with_context(|| format!("read metadata for {}", full_path.display()));
+        }
+    };
+    let (mode, contents) = if metadata.file_type().is_symlink() {
+        (
+            "120000".to_string(),
+            fs::read_link(&full_path)?
+                .to_string_lossy()
+                .to_string()
+                .into_bytes(),
+        )
+    } else if metadata.is_file() {
+        (worktree_file_mode(&metadata), fs::read(&full_path)?)
+    } else {
+        return Ok(None);
+    };
+    let hash = pseudo_blob_hash(&contents);
+    Ok(Some(FileEntry {
+        mode,
+        hash,
+        contents,
+    }))
 }
 
 fn compare_entries(
@@ -252,6 +304,38 @@ fn resolve_commit<'repo>(
         .rev_parse_single(revision.as_bytes().as_bstr())?
         .object()?
         .peel_to_commit()?)
+}
+
+fn resolve_default_base_commit<'repo>(
+    repo: &'repo gix::Repository,
+) -> Result<Option<gix::Commit<'repo>>> {
+    let Some(remote_name) = default_remote_name(repo)? else {
+        return Ok(None);
+    };
+    let remote_head = format!("refs/remotes/{remote_name}/HEAD");
+    let mut reference = repo
+        .find_reference(remote_head.as_str())
+        .with_context(|| format!("resolve default branch from {remote_head}"))?;
+    Ok(Some(reference.peel_to_commit().with_context(|| {
+        format!("peel default branch {remote_head} to commit")
+    })?))
+}
+
+fn default_remote_name(repo: &gix::Repository) -> Result<Option<String>> {
+    if let Some(head) = repo.head_ref()?
+        && let Some(remote_name) = head
+            .remote_name(Direction::Fetch)
+            .and_then(|name| name.as_symbol().map(ToOwned::to_owned))
+            .filter(|name| name != ".")
+    {
+        return Ok(Some(remote_name));
+    }
+
+    if let Some(remote_name) = repo.remote_default_name(Direction::Fetch) {
+        return Ok(Some(remote_name.as_ref().to_str_lossy().to_string()));
+    }
+
+    Ok(None)
 }
 
 fn parent_ids<'repo>(commit: &gix::Commit<'repo>) -> Vec<gix::Id<'repo>> {

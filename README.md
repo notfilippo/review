@@ -22,6 +22,10 @@ review
 
 The browser opens with the current changes. Click **Finish review** to print comments to stdout as Markdown.
 
+By default, `review` compares the repository mainline (`trunk()` for jj, the default branch for Git) with your current working copy, including uncommitted changes.
+
+In local-only repos without a discovered Git mainline, it uses an empty base to match jj's root-based `trunk()` behavior.
+
 ## 🤖 AI Agent Workflow
 
 Two workflows work well with Codex, Claude, or another coding agent.
