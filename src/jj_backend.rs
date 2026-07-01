@@ -22,6 +22,8 @@ use crate::cli::CliOptions;
 use crate::diff::{FileDiffInput, FileSnapshot, render_patch};
 use crate::vcs::{ReviewInput, build_review_input};
 
+const DEFAULT_REVIEW_REVSET: &str = "trunk()..@";
+
 pub async fn load_review_input(
     options: &CliOptions,
     root: &Path,
@@ -43,9 +45,7 @@ pub async fn load_review_input(
         options.revisions.as_slice(),
     ) {
         (None, None, []) => {
-            let from = resolve_single(&repo, root, &options.cwd, "trunk()").await?;
-            let to = resolve_single(&repo, root, &options.cwd, "@").await?;
-            change_between(&from.tree(), &to.tree(), paths).await
+            revset_change(&repo, root, &options.cwd, DEFAULT_REVIEW_REVSET, paths).await
         }
         (None, None, revisions) => {
             let expression = combine_revsets(revisions);
