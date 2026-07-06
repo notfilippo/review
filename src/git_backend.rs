@@ -6,21 +6,45 @@ use std::path::Path;
 
 use anyhow::{Context, Result, bail};
 use gix::bstr::{BString, ByteSlice};
-use gix::dir::entry::Kind;
-use gix::dir::walk::EmissionMode;
+use gix::index::entry::{Flags as IndexFlags, Mode as IndexMode, Stage};
 use gix::object::tree::EntryMode;
 use gix::remote::Direction;
+use gix::status::UntrackedFiles;
 
 use crate::cli::CliOptions;
 use crate::diff::{FileDiffInput, FileSnapshot, render_patch};
 use crate::vcs::{ReviewInput, build_review_input};
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug)]
 struct FileEntry {
     mode: String,
-    hash: String,
-    contents: Vec<u8>,
+    source: FileSource,
 }
+
+#[derive(Clone, Debug)]
+enum FileSource {
+    Object(gix::ObjectId),
+    Inline {
+        id: gix::ObjectId,
+        contents: Vec<u8>,
+    },
+}
+
+impl FileEntry {
+    fn id(&self) -> gix::ObjectId {
+        match &self.source {
+            FileSource::Object(id) | FileSource::Inline { id, .. } => *id,
+        }
+    }
+}
+
+impl PartialEq for FileEntry {
+    fn eq(&self, other: &Self) -> bool {
+        self.mode == other.mode && self.id() == other.id()
+    }
+}
+
+impl Eq for FileEntry {}
 
 pub fn load_review_input(
     options: &CliOptions,
@@ -60,14 +84,20 @@ fn default_worktree_review(
         let head = repo.head_commit().context("resolve HEAD commit")?;
         let head_entries = collect_tree_entries(&head.tree().context("read HEAD tree")?, paths)?;
         let old_entries = if let Some(base) = resolve_default_base_commit(repo)? {
-            collect_tree_entries(&base.tree().context("read default branch tree")?, paths)?
+            let merge_base = repo
+                .merge_base(head.id(), base.id())
+                .context("resolve merge base with default branch")?;
+            let merge_base = repo
+                .find_commit(merge_base)
+                .context("read merge-base commit")?;
+            collect_tree_entries(&merge_base.tree().context("read merge-base tree")?, paths)?
         } else {
             BTreeMap::new()
         };
         (old_entries, head_entries)
     };
     let new_entries = collect_worktree_entries(repo, root, head_entries, paths)?;
-    let files = compare_entries(&old_entries, &new_entries, paths);
+    let files = compare_entries(repo, &old_entries, &new_entries, paths)?;
     let patch = render_patch(&files)?;
     Ok(build_review_input(patch, files))
 }
@@ -88,7 +118,7 @@ fn commit_review(repo: &gix::Repository, revision: &str, paths: &[String]) -> Re
         BTreeMap::new()
     };
     let new_entries = collect_tree_entries(&commit.tree()?, paths)?;
-    let files = compare_entries(&old_entries, &new_entries, paths);
+    let files = compare_entries(repo, &old_entries, &new_entries, paths)?;
     let patch = render_patch(&files)?;
     Ok(build_review_input(patch, files))
 }
@@ -103,7 +133,7 @@ fn range_review(
     let to = resolve_commit(repo, to_rev)?;
     let old_entries = collect_tree_entries(&from.tree()?, paths)?;
     let new_entries = collect_tree_entries(&to.tree()?, paths)?;
-    let files = compare_entries(&old_entries, &new_entries, paths);
+    let files = compare_entries(repo, &old_entries, &new_entries, paths)?;
     let patch = render_patch(&files)?;
     Ok(build_review_input(patch, files))
 }
@@ -140,17 +170,11 @@ fn collect_tree_entries_at(
         if !path_allowed(&path, paths) {
             continue;
         }
-        let contents = if entry.mode().is_commit() {
-            entry.object_id().to_string().into_bytes()
-        } else {
-            entry.object()?.try_into_blob()?.data.clone()
-        };
         entries.insert(
             path,
             FileEntry {
                 mode: mode_string(entry.mode()),
-                hash: entry.object_id().to_string(),
-                contents,
+                source: FileSource::Object(entry.object_id()),
             },
         );
     }
@@ -163,72 +187,91 @@ fn collect_worktree_entries(
     mut entries: BTreeMap<String, FileEntry>,
     paths: &[String],
 ) -> Result<BTreeMap<String, FileEntry>> {
-    prune_missing_worktree_entries(root, &mut entries)?;
-    overlay_visible_worktree_entries(repo, root, paths, &mut entries)?;
-    Ok(entries)
-}
-
-fn prune_missing_worktree_entries(
-    root: &Path,
-    entries: &mut BTreeMap<String, FileEntry>,
-) -> Result<()> {
-    let mut removed = Vec::new();
-    for path in entries.keys() {
-        if !worktree_path_is_file(root, path)? {
-            removed.push(path.clone());
-        }
-    }
-    for path in removed {
-        entries.remove(&path);
-    }
-    Ok(())
-}
-
-fn overlay_visible_worktree_entries(
-    repo: &gix::Repository,
-    root: &Path,
-    paths: &[String],
-    entries: &mut BTreeMap<String, FileEntry>,
-) -> Result<()> {
     let index = repo.index_or_empty()?;
+    overlay_index_entries(&index, paths, &mut entries);
+    let executable_bit = repo.filesystem_options()?.executable_bit;
     let patterns = paths
         .iter()
         .map(|path| BString::from(path.as_str()))
         .collect::<Vec<_>>();
-    let options = repo
-        .dirwalk_options()?
-        .emit_tracked(true)
-        .emit_ignored(None)
-        .emit_untracked(EmissionMode::Matching);
-    let mut iter = repo.dirwalk_iter(index, patterns, Default::default(), options)?;
+    let mut iter = repo
+        .status(gix::progress::Discard)?
+        .untracked_files(UntrackedFiles::Files)
+        .index_worktree_submodules(None)
+        .index_worktree_rewrites(None)
+        .into_index_worktree_iter(patterns)?;
     for item in &mut iter {
         let item = item?;
-        let path = item.entry.rela_path.to_str_lossy().to_string();
-        if !path_allowed(&path, paths) || item.entry.disk_kind == Some(Kind::Directory) {
+        if item.summary().is_none() {
             continue;
         }
-        if let Some(entry) = read_worktree_file_entry(root, &path)? {
+        let relative_path = item.rela_path();
+        let path = relative_path.to_str_lossy().to_string();
+        if !path_allowed(&path, paths) {
+            continue;
+        }
+        let index_entry = index.entry_by_path(relative_path);
+        if let Some(entry) =
+            read_worktree_file_entry(repo, root, &path, index_entry, executable_bit)?
+        {
             entries.insert(path, entry);
+        } else if let Some(index_entry) = index_entry.filter(|entry| {
+            entry.flags.contains(IndexFlags::SKIP_WORKTREE) || entry.mode.is_submodule()
+        }) {
+            entries.insert(path, file_entry_from_index(index_entry));
         } else {
             entries.remove(&path);
         }
     }
-    Ok(())
+    Ok(entries)
 }
 
-fn worktree_path_is_file(root: &Path, path: &str) -> Result<bool> {
-    let full_path = root.join(path);
-    let metadata = match fs::symlink_metadata(&full_path) {
-        Ok(metadata) => metadata,
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(false),
-        Err(err) => {
-            return Err(err).with_context(|| format!("read metadata for {}", full_path.display()));
+fn overlay_index_entries(
+    index: &gix::index::State,
+    paths: &[String],
+    entries: &mut BTreeMap<String, FileEntry>,
+) {
+    let mut tracked_paths = BTreeSet::new();
+    let mut sparse_dirs = Vec::new();
+    for entry in index.entries() {
+        if !matches!(entry.stage(), Stage::Unconflicted | Stage::Ours) {
+            continue;
         }
-    };
-    Ok(metadata.file_type().is_symlink() || metadata.is_file())
+        let path = entry.path(index).to_str_lossy().to_string();
+        if entry.mode.is_sparse() {
+            if path_may_match_dir(&path, paths) {
+                sparse_dirs.push(path);
+            }
+            continue;
+        }
+        if !path_allowed(&path, paths) {
+            continue;
+        }
+        tracked_paths.insert(path.clone());
+        entries.insert(path, file_entry_from_index(entry));
+    }
+    entries.retain(|path, _| {
+        tracked_paths.contains(path)
+            || sparse_dirs
+                .iter()
+                .any(|dir| path == dir || path.starts_with(&format!("{dir}/")))
+    });
 }
 
-fn read_worktree_file_entry(root: &Path, path: &str) -> Result<Option<FileEntry>> {
+fn file_entry_from_index(entry: &gix::index::Entry) -> FileEntry {
+    FileEntry {
+        mode: index_mode_string(entry.mode),
+        source: FileSource::Object(entry.id),
+    }
+}
+
+fn read_worktree_file_entry(
+    repo: &gix::Repository,
+    root: &Path,
+    path: &str,
+    index_entry: Option<&gix::index::Entry>,
+    executable_bit: bool,
+) -> Result<Option<FileEntry>> {
     let full_path = root.join(path);
     let metadata = match fs::symlink_metadata(&full_path) {
         Ok(metadata) => metadata,
@@ -246,23 +289,30 @@ fn read_worktree_file_entry(root: &Path, path: &str) -> Result<Option<FileEntry>
                 .into_bytes(),
         )
     } else if metadata.is_file() {
-        (worktree_file_mode(&metadata), fs::read(&full_path)?)
+        (
+            worktree_file_mode(
+                &metadata,
+                index_entry.map(|entry| entry.mode),
+                executable_bit,
+            ),
+            fs::read(&full_path)?,
+        )
     } else {
         return Ok(None);
     };
-    let hash = pseudo_blob_hash(&contents);
+    let id = gix::objs::compute_hash(repo.object_hash(), gix::objs::Kind::Blob, &contents)?;
     Ok(Some(FileEntry {
         mode,
-        hash,
-        contents,
+        source: FileSource::Inline { id, contents },
     }))
 }
 
 fn compare_entries(
+    repo: &gix::Repository,
     old_entries: &BTreeMap<String, FileEntry>,
     new_entries: &BTreeMap<String, FileEntry>,
     paths: &[String],
-) -> Vec<FileDiffInput> {
+) -> Result<Vec<FileDiffInput>> {
     let keys = old_entries
         .keys()
         .chain(new_entries.keys())
@@ -281,19 +331,25 @@ fn compare_entries(
         files.push(FileDiffInput {
             old_path: path.clone(),
             new_path: path,
-            old: old.cloned().map(file_snapshot),
-            new: new.cloned().map(file_snapshot),
+            old: old.map(|entry| file_snapshot(repo, entry)).transpose()?,
+            new: new.map(|entry| file_snapshot(repo, entry)).transpose()?,
         });
     }
-    files
+    Ok(files)
 }
 
-fn file_snapshot(entry: FileEntry) -> FileSnapshot {
-    FileSnapshot {
-        mode: entry.mode,
-        hash: entry.hash,
-        contents: entry.contents,
-    }
+fn file_snapshot(repo: &gix::Repository, entry: &FileEntry) -> Result<FileSnapshot> {
+    let id = entry.id();
+    let contents = match &entry.source {
+        FileSource::Inline { contents, .. } => contents.clone(),
+        FileSource::Object(_) if entry.mode == "160000" => id.to_string().into_bytes(),
+        FileSource::Object(_) => repo.find_object(id)?.try_into_blob()?.data.clone(),
+    };
+    Ok(FileSnapshot {
+        mode: entry.mode.clone(),
+        hash: id.to_string(),
+        contents,
+    })
 }
 
 fn resolve_commit<'repo>(
@@ -346,6 +402,10 @@ fn mode_string(mode: EntryMode) -> String {
     format!("{:06o}", mode.value())
 }
 
+fn index_mode_string(mode: IndexMode) -> String {
+    format!("{:06o}", mode.bits())
+}
+
 fn path_allowed(path: &str, paths: &[String]) -> bool {
     paths.is_empty()
         || paths
@@ -362,17 +422,18 @@ fn path_may_match_dir(path: &str, paths: &[String]) -> bool {
         })
 }
 
-fn pseudo_blob_hash(contents: &[u8]) -> String {
-    let mut hash = 0xcbf29ce484222325u64;
-    for byte in contents {
-        hash ^= u64::from(*byte);
-        hash = hash.wrapping_mul(0x100000001b3);
-    }
-    format!("{hash:040x}")
-}
-
 #[cfg(unix)]
-fn worktree_file_mode(metadata: &fs::Metadata) -> String {
+fn worktree_file_mode(
+    metadata: &fs::Metadata,
+    index_mode: Option<IndexMode>,
+    executable_bit: bool,
+) -> String {
+    if !executable_bit {
+        return index_mode
+            .filter(|mode| matches!(*mode, IndexMode::FILE | IndexMode::FILE_EXECUTABLE))
+            .map(index_mode_string)
+            .unwrap_or_else(|| "100644".to_string());
+    }
     if metadata.permissions().mode() & 0o111 != 0 {
         "100755".to_string()
     } else {
@@ -381,6 +442,13 @@ fn worktree_file_mode(metadata: &fs::Metadata) -> String {
 }
 
 #[cfg(not(unix))]
-fn worktree_file_mode(_metadata: &fs::Metadata) -> String {
-    "100644".to_string()
+fn worktree_file_mode(
+    _metadata: &fs::Metadata,
+    index_mode: Option<IndexMode>,
+    _executable_bit: bool,
+) -> String {
+    index_mode
+        .filter(|mode| matches!(*mode, IndexMode::FILE | IndexMode::FILE_EXECUTABLE))
+        .map(index_mode_string)
+        .unwrap_or_else(|| "100644".to_string())
 }

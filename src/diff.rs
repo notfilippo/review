@@ -167,7 +167,7 @@ fn null_or_prefixed(prefix: &str, path: &str, present: bool) -> String {
 fn quote_git_path(path: &str) -> String {
     if path
         .bytes()
-        .all(|byte| byte > b' ' && byte != b'"' && byte != b'\\')
+        .all(|byte| (b' '..=b'~').contains(&byte) && byte != b'"' && byte != b'\\')
     {
         return path.to_string();
     }

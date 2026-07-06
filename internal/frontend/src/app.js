@@ -165,10 +165,16 @@ function bindActions() {
     if (state.codeView) {
       renderDiffs();
     }
-    await requestJSON("/api/complete", {
-      method: "POST",
-      body: JSON.stringify({ comments: state.comments }),
-    });
+    try {
+      await requestJSON("/api/complete", {
+        method: "POST",
+        body: JSON.stringify({ comments: state.comments }),
+      });
+    } catch (error) {
+      els.status.textContent = `Failed to finish review: ${error.message}`;
+      els.done.disabled = false;
+      return;
+    }
     state.completed = true;
     els.status.textContent = "Completed";
     closeReviewWindow();

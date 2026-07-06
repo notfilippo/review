@@ -1,5 +1,7 @@
 import { state } from "./state.js";
 
+const REQUEST_TIMEOUT_MS = 15000;
+
 export async function requestJSON(path, options = {}) {
   const response = await fetch(path, {
     ...options,
@@ -8,6 +10,7 @@ export async function requestJSON(path, options = {}) {
       "X-Review-Token": state.token,
       ...(options.headers || {}),
     },
+    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
   });
   if (!response.ok) {
     throw new Error(await responseErrorMessage(response));

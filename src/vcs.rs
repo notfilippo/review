@@ -1,4 +1,5 @@
-use std::path::{Path, PathBuf};
+use std::io::ErrorKind;
+use std::path::{Component, Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
@@ -200,27 +201,83 @@ fn normalize_path_filters(root: &Path, cwd: &Path, paths: &[String]) -> Result<V
     }
     let root = canonical_dir(root)?;
     let cwd = canonical_dir(cwd)?;
-    paths
-        .iter()
-        .map(|path| {
-            let mut full_path = PathBuf::from(path);
-            if !full_path.is_absolute() {
-                full_path = cwd.join(full_path);
-            }
-            let full_path = full_path
-                .canonicalize()
-                .unwrap_or_else(|_| full_path.clone());
-            let rel = full_path
-                .strip_prefix(&root)
-                .with_context(|| format!("path {path:?} is outside repository"))?;
-            Ok(rel.to_string_lossy().replace('\\', "/"))
-        })
-        .collect()
+    let mut normalized = Vec::with_capacity(paths.len());
+    for path in paths {
+        let input = Path::new(path);
+        let full_path = if input.is_absolute() {
+            input.to_path_buf()
+        } else {
+            cwd.join(input)
+        };
+        let full_path = normalize_lexically(&full_path);
+        let full_path = if full_path == root {
+            root.clone()
+        } else {
+            canonicalize_parent(&full_path)?
+        };
+        let rel = full_path
+            .strip_prefix(&root)
+            .with_context(|| format!("path {path:?} is outside repository"))?;
+        if rel.as_os_str().is_empty() {
+            return Ok(Vec::new());
+        }
+        normalized.push(rel.to_string_lossy().replace('\\', "/"));
+    }
+    Ok(normalized)
 }
 
 fn canonical_dir(path: &Path) -> Result<PathBuf> {
     path.canonicalize()
         .with_context(|| format!("canonicalize {}", path.display()))
+}
+
+fn canonicalize_parent(path: &Path) -> Result<PathBuf> {
+    let Some(name) = path.file_name() else {
+        return canonical_dir(path);
+    };
+    let parent = path.parent().unwrap_or(path);
+    Ok(canonicalize_existing_prefix(parent)?.join(name))
+}
+
+fn canonicalize_existing_prefix(path: &Path) -> Result<PathBuf> {
+    let mut current = path;
+    let mut suffix = Vec::new();
+    loop {
+        match current.canonicalize() {
+            Ok(mut canonical) => {
+                for component in suffix.iter().rev() {
+                    canonical.push(component);
+                }
+                return Ok(canonical);
+            }
+            Err(err) if err.kind() == ErrorKind::NotFound => {
+                let Some(name) = current.file_name() else {
+                    return Err(err).with_context(|| format!("canonicalize {}", path.display()));
+                };
+                suffix.push(name.to_os_string());
+                current = current.parent().unwrap_or(current);
+            }
+            Err(err) => {
+                return Err(err).with_context(|| format!("canonicalize {}", path.display()));
+            }
+        }
+    }
+}
+
+fn normalize_lexically(path: &Path) -> PathBuf {
+    let mut normalized = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::Prefix(_) | Component::RootDir | Component::Normal(_) => {
+                normalized.push(component.as_os_str());
+            }
+            Component::ParentDir => {
+                normalized.pop();
+            }
+            Component::CurDir => {}
+        }
+    }
+    normalized
 }
 
 fn snapshot_contents(snapshot: Option<&FileSnapshot>) -> String {
@@ -233,4 +290,54 @@ fn trim_optional(value: Option<String>) -> Option<String> {
     value
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::fs;
+    #[cfg(unix)]
+    use std::os::unix::fs::symlink;
+    use std::path::PathBuf;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    use super::normalize_path_filters;
+
+    fn temp_dir(name: &str) -> PathBuf {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("current time follows the Unix epoch")
+            .as_nanos();
+        std::env::temp_dir().join(format!("review-{name}-{}-{unique}", std::process::id()))
+    }
+
+    #[test]
+    fn repository_root_disables_path_filtering() {
+        let root = temp_dir("root-filter");
+        fs::create_dir_all(&root).expect("create test repository root");
+
+        let filters =
+            normalize_path_filters(&root, &root, &[".".to_string()]).expect("normalize root");
+
+        assert!(filters.is_empty());
+        fs::remove_dir_all(root).expect("remove test repository root");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn final_symlink_component_is_not_resolved() {
+        let container = temp_dir("symlink-filter");
+        let root = container.join("repo");
+        let outside = container.join("outside");
+        fs::create_dir_all(&root).expect("create test repository root");
+        fs::write(&outside, "outside").expect("create symlink target");
+        symlink(&outside, root.join("link")).expect("create path-filter symlink");
+        symlink(&root, root.join("root-link")).expect("create root symlink");
+
+        let filters =
+            normalize_path_filters(&root, &root, &["link".to_string(), "root-link".to_string()])
+                .expect("normalize symlinks");
+
+        assert_eq!(filters, ["link", "root-link"]);
+        fs::remove_dir_all(container).expect("remove symlink test directory");
+    }
 }

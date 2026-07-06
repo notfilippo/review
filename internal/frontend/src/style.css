@@ -241,6 +241,13 @@ textarea {
   min-width: 0;
 }
 
+.brand-text {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
 .brand strong {
   font-size: var(--font-size-title);
 }

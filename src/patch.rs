@@ -240,19 +240,20 @@ fn split_git_file_patches(patch: &str) -> Vec<String> {
 }
 
 fn unquote_patch_path(path: &str) -> String {
-    let mut out = String::new();
+    let mut out = Vec::new();
     let mut chars = path[1..path.len() - 1].chars();
     while let Some(ch) = chars.next() {
         if ch != '\\' {
-            out.push(ch);
+            let mut encoded = [0; 4];
+            out.extend_from_slice(ch.encode_utf8(&mut encoded).as_bytes());
             continue;
         }
         match chars.next() {
-            Some('n') => out.push('\n'),
-            Some('t') => out.push('\t'),
-            Some('r') => out.push('\r'),
-            Some('\\') => out.push('\\'),
-            Some('"') => out.push('"'),
+            Some('n') => out.push(b'\n'),
+            Some('t') => out.push(b'\t'),
+            Some('r') => out.push(b'\r'),
+            Some('\\') => out.push(b'\\'),
+            Some('"') => out.push(b'"'),
             Some(ch @ '0'..='7') => {
                 let mut value = ch.to_digit(8).unwrap_or(0);
                 for _ in 0..2 {
@@ -264,11 +265,28 @@ fn unquote_patch_path(path: &str) -> String {
                         None => break,
                     }
                 }
-                out.push(char::from_u32(value).unwrap_or('?'));
+                out.push(u8::try_from(value).unwrap_or(b'?'));
             }
-            Some(other) => out.push(other),
-            None => out.push('\\'),
+            Some(other) => {
+                let mut encoded = [0; 4];
+                out.extend_from_slice(other.encode_utf8(&mut encoded).as_bytes());
+            }
+            None => out.push(b'\\'),
         }
     }
-    out
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_patch_files;
+
+    #[test]
+    fn octal_path_escapes_decode_as_utf8() {
+        let files = parse_patch_files("diff --git \"a/caf\\303\\251.rs\" \"b/caf\\303\\251.rs\"\n");
+
+        assert_eq!(files.len(), 1);
+        assert_eq!(files[0].path, "café.rs");
+        assert_eq!(files[0].prev_path.as_deref(), Some("café.rs"));
+    }
 }

@@ -376,7 +376,7 @@ function commentSnippet(text) {
   if (singleLine.length <= 120) {
     return singleLine;
   }
-  return `${singleLine.slice(0, 117)}...`;
+  return `${[...singleLine].slice(0, 117).join("")}...`;
 }
 
 function activeCommentId() {

@@ -279,28 +279,46 @@ function expandHiddenSearchMatch(match) {
 }
 
 function collectMatches(query) {
-  const needle = query.toLowerCase();
+  const needle = foldWithSourceOffsets(query).value;
   const matches = [];
 
   for (const file of state.files) {
     for (const line of searchLinesForFile(file)) {
-      const haystack = line.text.toLowerCase();
-      let index = haystack.indexOf(needle);
+      const haystack = foldWithSourceOffsets(line.text);
+      let index = haystack.value.indexOf(needle);
       while (index !== -1) {
         matches.push({
           ...line,
-          startColumn: index,
-          endColumn: index + query.length,
+          startColumn: haystack.sourceStarts[index],
+          endColumn: haystack.sourceEnds[index + needle.length - 1],
         });
         if (matches.length >= MAX_SEARCH_MATCHES) {
           return { matches, truncated: true };
         }
-        index = haystack.indexOf(needle, index + query.length);
+        index = haystack.value.indexOf(needle, index + needle.length);
       }
     }
   }
 
   return { matches, truncated: false };
+}
+
+function foldWithSourceOffsets(text) {
+  let value = "";
+  let sourceOffset = 0;
+  const sourceStarts = [];
+  const sourceEnds = [];
+  for (const character of text) {
+    const sourceEnd = sourceOffset + character.length;
+    const folded = character.toLowerCase();
+    value += folded;
+    for (let index = 0; index < folded.length; index += 1) {
+      sourceStarts.push(sourceOffset);
+      sourceEnds.push(sourceEnd);
+    }
+    sourceOffset = sourceEnd;
+  }
+  return { value, sourceStarts, sourceEnds };
 }
 
 function* searchLinesForFile(file) {

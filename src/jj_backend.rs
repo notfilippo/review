@@ -45,11 +45,19 @@ pub async fn load_review_input(
         options.revisions.as_slice(),
     ) {
         (None, None, []) => {
-            revset_change(&repo, root, &options.cwd, DEFAULT_REVIEW_REVSET, paths).await
+            revset_change(
+                &repo,
+                root,
+                &options.cwd,
+                DEFAULT_REVIEW_REVSET,
+                paths,
+                true,
+            )
+            .await
         }
         (None, None, revisions) => {
             let expression = combine_revsets(revisions);
-            revset_change(&repo, root, &options.cwd, &expression, paths).await
+            revset_change(&repo, root, &options.cwd, &expression, paths, false).await
         }
         (from_rev, to_rev, []) => {
             let from = resolve_single(
@@ -129,9 +137,10 @@ async fn revset_change(
     cwd: &Path,
     expression: &str,
     paths: &[String],
+    allow_empty: bool,
 ) -> Result<ReviewInput> {
     let commits = resolve_revset(repo, root, cwd, expression).await?;
-    let target = revset_diff_target(repo, commits, expression).await?;
+    let target = revset_diff_target(repo, commits, expression, allow_empty).await?;
     change_between(&target.from, &target.to, paths).await
 }
 
@@ -227,9 +236,16 @@ async fn revset_diff_target(
     repo: &Arc<ReadonlyRepo>,
     commits: Vec<Commit>,
     expression: &str,
+    allow_empty: bool,
 ) -> Result<RevsetDiffTarget> {
     if commits.is_empty() {
-        bail!("revset {expression:?} resolved to no commits");
+        if !allow_empty {
+            bail!("revset {expression:?} resolved to no commits");
+        }
+        let root_commit = repo.store().root_commit();
+        let from = merge_commit_trees(repo.as_ref(), std::slice::from_ref(&root_commit)).await?;
+        let to = merge_commit_trees(repo.as_ref(), std::slice::from_ref(&root_commit)).await?;
+        return Ok(RevsetDiffTarget { from, to });
     }
 
     let commit_by_id = commits
