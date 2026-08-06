@@ -58,6 +58,7 @@ pub fn load_review_input(
         options.revisions.as_slice(),
     ) {
         (None, None, []) => default_worktree_review(&repo, root, paths),
+        (Some(from_rev), None, []) => worktree_review(&repo, root, from_rev, paths),
         (None, None, [revision]) => commit_review(&repo, revision, paths),
         (None, None, revisions) => {
             bail!("git mode supports one -r revision, got {}", revisions.len())
@@ -70,6 +71,27 @@ pub fn load_review_input(
         ),
         _ => unreachable!("CLI rejects combining revisions with from/to"),
     }
+}
+
+fn worktree_review(
+    repo: &gix::Repository,
+    root: &Path,
+    from_rev: &str,
+    paths: &[String],
+) -> Result<ReviewInput> {
+    let from = resolve_commit(repo, from_rev)?;
+    let old_entries = collect_tree_entries(&from.tree()?, paths)?;
+    let head = repo.head().context("resolve HEAD")?;
+    let head_entries = if head.is_unborn() {
+        BTreeMap::new()
+    } else {
+        let head = repo.head_commit().context("resolve HEAD commit")?;
+        collect_tree_entries(&head.tree().context("read HEAD tree")?, paths)?
+    };
+    let new_entries = collect_worktree_entries(repo, root, head_entries, paths)?;
+    let files = compare_entries(repo, &old_entries, &new_entries, paths)?;
+    let patch = render_patch(&files)?;
+    Ok(build_review_input(patch, files))
 }
 
 fn default_worktree_review(

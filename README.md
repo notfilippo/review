@@ -66,9 +66,15 @@ review -r '@'
 #### Git
 
 ```sh
+# Review from a commit through the current worktree.
+review --from main
+
 # Review a commit range.
 review --from main --to HEAD
 ```
+
+When `--from` is specified without `--to`, the review includes committed and
+uncommitted changes through the current worktree.
 
 ## UI
 
