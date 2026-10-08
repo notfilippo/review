@@ -7,7 +7,6 @@ import {
 import { renderDiffs, setCurrentPath } from "./diff-view.js";
 import { createLucideIcon, setIconButton } from "./icons.js";
 import { isNarrowViewport, setSidebarTab, setTreeCollapsed } from "./layout.js";
-import { findRenderedLines, selectedSearchText } from "./search.js";
 import { els, state } from "./state.js";
 import { afterNextPaint } from "./util.js";
 
@@ -15,6 +14,7 @@ const IDENTIFIER_PATTERN = /[\p{L}\p{N}_$]+/gu;
 const FLASH_BACKGROUND = "color-mix(in srgb, var(--accent-2) 30%, transparent)";
 const FLASH_MS = 1600;
 const STREAM_RENDER_MS = 120;
+const DIFF_SIDE_SELECTOR = "[data-additions], [data-deletions], [data-unified]";
 const IS_MAC = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
 const MODIFIER_LABEL = IS_MAC ? "⌘" : "Ctrl";
 
@@ -28,15 +28,14 @@ export function setupReferences() {
   setIconButton(els.repoSearchWord, "WholeWord", "Match whole word");
   setIconButton(els.repoSearchRegex, "Regex", "Use regular expression");
   setIconButton(els.peekClose, "X", "Close preview");
+  setIconButton(els.searchToggle, "Search", "Search repository");
+  els.searchToggle.addEventListener("click", () => openRepoSearch(selectedText()));
 
   els.repoSearchForm.addEventListener("submit", (event) => {
     event.preventDefault();
     runRepoSearch();
   });
-  els.repoSearchInput.addEventListener("input", () => {
-    state.refs.query = els.repoSearchInput.value;
-    scheduleLiveSearch();
-  });
+  els.repoSearchInput.addEventListener("input", scheduleLiveSearch);
   els.repoSearchInput.addEventListener("keydown", (event) => {
     if (event.key !== "Escape") {
       return;
@@ -45,7 +44,6 @@ export function setupReferences() {
     event.stopPropagation();
     if (els.repoSearchInput.value) {
       els.repoSearchInput.value = "";
-      state.refs.query = "";
       clearResults();
     } else {
       els.repoSearchInput.blur();
@@ -59,7 +57,7 @@ export function setupReferences() {
     button.addEventListener("click", () => {
       state.refs[key] = !state.refs[key];
       syncOptionButtons();
-      if (state.refs.query.trim()) {
+      if (els.repoSearchInput.value.trim()) {
         runRepoSearch();
       }
     });
@@ -73,9 +71,9 @@ export function handleReferencesKey(event) {
   if (event.defaultPrevented) {
     return false;
   }
-  if ((event.metaKey || event.ctrlKey) && event.shiftKey && !event.altKey && event.key.toLowerCase() === "f") {
+  if ((event.metaKey || event.ctrlKey) && !event.altKey && event.key.toLowerCase() === "f") {
     event.preventDefault();
-    openRepoSearch(selectedSearchText().split("\n")[0]);
+    openRepoSearch(selectedText());
     return true;
   }
   if (event.key === "Escape" && !els.peek.hidden) {
@@ -113,13 +111,8 @@ export function referenceTokenOptions() {
   };
 }
 
-export function findReferences(identifier) {
-  Object.assign(state.refs, {
-    query: identifier,
-    word: true,
-    caseSensitive: true,
-    regex: false,
-  });
+function findReferences(identifier) {
+  Object.assign(state.refs, { word: true, caseSensitive: true, regex: false });
   els.repoSearchInput.value = identifier;
   syncOptionButtons();
   showSearchTab();
@@ -129,7 +122,6 @@ export function findReferences(identifier) {
 function openRepoSearch(prefill) {
   if (prefill) {
     els.repoSearchInput.value = prefill;
-    state.refs.query = prefill;
   }
   showSearchTab();
   els.repoSearchInput.focus();
@@ -192,7 +184,7 @@ function underlineToken(element) {
 
 function scheduleLiveSearch() {
   clearTimeout(debounceTimer);
-  const query = state.refs.query.trim();
+  const query = els.repoSearchInput.value.trim();
   if (!query) {
     clearResults();
     return;
@@ -206,7 +198,6 @@ function scheduleLiveSearch() {
 async function runRepoSearch() {
   clearTimeout(debounceTimer);
   const query = els.repoSearchInput.value;
-  state.refs.query = query;
   if (!query.trim()) {
     clearResults();
     return;
@@ -215,7 +206,6 @@ async function runRepoSearch() {
   const controller = new AbortController();
   state.refs.controller = controller;
   Object.assign(state.refs, {
-    loading: true,
     error: "",
     activeKey: "",
     collapsedFiles: new Set(),
@@ -247,7 +237,6 @@ async function runRepoSearch() {
   }
   if (state.refs.controller === controller) {
     state.refs.controller = null;
-    state.refs.loading = false;
     renderResults();
   }
 }
@@ -319,7 +308,6 @@ function stopRepoSearch() {
   }
   state.refs.controller?.abort();
   state.refs.controller = null;
-  state.refs.loading = false;
 }
 
 function clearResults() {
@@ -352,7 +340,8 @@ function renderResults() {
 }
 
 function renderStatus() {
-  const { loading, error, response } = state.refs;
+  const { controller, error, response } = state.refs;
+  const loading = Boolean(controller);
   els.repoSearchStatus.dataset.error = String(Boolean(error));
   els.refsCount.textContent = response ? countLabel(response) : "0";
   if (error) {
@@ -401,7 +390,7 @@ function statusLabel(response, loading) {
 function emptyHint() {
   const hint = document.createElement("p");
   hint.className = "repo-search-empty";
-  hint.textContent = `${MODIFIER_LABEL}-click a symbol in the diff to find its references. ${MODIFIER_LABEL}⇧F searches with the current selection.`;
+  hint.textContent = `${MODIFIER_LABEL}-click a symbol in the diff to find its references. ${MODIFIER_LABEL}F searches with the current selection.`;
   return hint;
 }
 
@@ -553,7 +542,64 @@ async function revealInDiff(reviewId, lineNumber) {
     behavior: "instant",
   });
   await afterNextPaint();
-  flashLines(findRenderedLines(reviewId, "additions", lineNumber));
+  flashLines(renderedAdditionLines(reviewId, lineNumber));
+}
+
+function renderedAdditionLines(reviewId, lineNumber) {
+  const item = state.codeView.getRenderedItems?.().find(({ id }) => id === reviewId);
+  if (!item?.element) {
+    return [];
+  }
+  return queryDeep(item.element, `[data-line="${lineNumber}"]`).filter((element) => {
+    const side = closestAcrossShadow(element, DIFF_SIDE_SELECTOR);
+    return !side || !side.hasAttribute("data-deletions");
+  });
+}
+
+// First line of the page selection, including selections inside the diff's
+// shadow roots, which window.getSelection() does not report.
+function selectedText() {
+  const selections = [window.getSelection()];
+  for (const host of queryDeep(els.diff, "*")) {
+    if (host.shadowRoot?.getSelection) {
+      selections.push(host.shadowRoot.getSelection());
+    }
+  }
+  for (const selection of selections) {
+    const text = String(selection || "").trim();
+    if (text) {
+      return text.split("\n")[0].trim();
+    }
+  }
+  return "";
+}
+
+function queryDeep(root, selector, matches = []) {
+  if (root instanceof Element) {
+    if (root.matches(selector)) {
+      matches.push(root);
+    }
+    if (root.shadowRoot) {
+      queryDeep(root.shadowRoot, selector, matches);
+    }
+  }
+  for (const child of root.children || []) {
+    queryDeep(child, selector, matches);
+  }
+  return matches;
+}
+
+function closestAcrossShadow(element, selector) {
+  let node = element;
+  while (node) {
+    const match = node.closest(selector);
+    if (match) {
+      return match;
+    }
+    const root = node.getRootNode();
+    node = root instanceof ShadowRoot ? root.host : undefined;
+  }
+  return undefined;
 }
 
 function flashLines(elements) {

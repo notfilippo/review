@@ -27,19 +27,12 @@
           </div>
         </div>
         <div class="actions">
-          <button id="search-toggle" class="icon-button" type="button" aria-pressed="false" aria-label="Search diff" title="Search diff"></button>
+          <button id="search-toggle" class="icon-button" type="button" aria-label="Search repository" title="Search repository"></button>
           <button id="layout-toggle" class="icon-button" type="button" aria-label="Switch to unified diff" title="Switch to unified diff"></button>
           <button id="collapse-toggle" class="icon-button" type="button" aria-label="Collapse all files" title="Collapse all files"></button>
           <button id="done" class="icon-button primary" type="button" aria-label="Finish review" title="Finish review"></button>
         </div>
       </header>
-      <div id="code-search" class="code-search" role="search" data-open="false">
-        <input id="search-input" class="search-input" type="search" placeholder="Search" autocomplete="off" spellcheck="false" aria-label="Search diff">
-        <span id="search-count" class="search-count" aria-live="polite"></span>
-        <button id="search-prev" class="icon-button search-nav" type="button" aria-label="Previous search result" title="Previous search result"></button>
-        <button id="search-next" class="icon-button search-nav" type="button" aria-label="Next search result" title="Next search result"></button>
-        <button id="search-close" class="icon-button search-nav" type="button" aria-label="Close search" title="Close search"></button>
-      </div>
       <main class="workspace">
         <div id="tree-backdrop" class="tree-backdrop" aria-hidden="true"></div>
         <aside class="sidebar">
@@ -58,10 +51,10 @@
           <div id="comment-nav" class="comment-nav sidebar-tab-panel" role="tabpanel" aria-labelledby="comments-tab" hidden></div>
           <div id="repo-search" class="repo-search sidebar-tab-panel" role="tabpanel" aria-labelledby="refs-tab" hidden>
             <form id="repo-search-form" class="repo-search-form" role="search">
-              <input id="repo-search-input" class="search-input" type="search" placeholder="Search repository" autocomplete="off" spellcheck="false" aria-label="Search repository">
-              <button id="repo-search-case" class="icon-button search-nav" type="button" aria-pressed="false"></button>
-              <button id="repo-search-word" class="icon-button search-nav" type="button" aria-pressed="false"></button>
-              <button id="repo-search-regex" class="icon-button search-nav" type="button" aria-pressed="false"></button>
+              <input id="repo-search-input" type="search" placeholder="Search repository" autocomplete="off" spellcheck="false" aria-label="Search repository">
+              <button id="repo-search-case" class="icon-button" type="button" aria-pressed="false"></button>
+              <button id="repo-search-word" class="icon-button" type="button" aria-pressed="false"></button>
+              <button id="repo-search-regex" class="icon-button" type="button" aria-pressed="false"></button>
             </form>
             <div id="repo-search-status" class="repo-search-status" aria-live="polite"></div>
             <div id="repo-search-results" class="repo-search-results"></div>
@@ -91,7 +84,7 @@
             <header class="peek-header">
               <span id="peek-title" class="peek-title"></span>
               <span class="peek-source" title="Files outside the review are read from the working copy">working copy</span>
-              <button id="peek-close" class="icon-button search-nav" type="button"></button>
+              <button id="peek-close" class="icon-button" type="button"></button>
             </header>
             <div class="peek-body">
               <div id="peek-message" class="peek-message" hidden></div>

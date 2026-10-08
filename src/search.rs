@@ -88,8 +88,6 @@ pub struct PreparedSearch {
 #[derive(Debug, Serialize)]
 pub struct SearchMatch {
     pub line: usize,
-    /// UTF-16 column of the first match in the full line, for editor jumps.
-    pub column: usize,
     pub text: String,
     /// UTF-16 offsets into `text`.
     pub ranges: Vec<[usize; 2]>,
@@ -102,7 +100,6 @@ pub struct SearchMatch {
 pub struct FileResponse {
     pub path: String,
     pub contents: String,
-    pub in_diff: bool,
 }
 
 struct Matchers {
@@ -287,7 +284,6 @@ impl SearchCorpus {
             return Ok(FileResponse {
                 contents: String::from_utf8_lossy(contents).into_owned(),
                 path,
-                in_diff: true,
             });
         }
         if self.shadowed.contains(&path) {
@@ -319,7 +315,6 @@ impl SearchCorpus {
         Ok(FileResponse {
             contents: String::from_utf8_lossy(&bytes).into_owned(),
             path,
-            in_diff: false,
         })
     }
 }
@@ -536,7 +531,6 @@ fn finish_line(bytes: &[u8], line: Option<LineHits>, matchers: &Matchers) -> Opt
     let Ok(text) = std::str::from_utf8(raw) else {
         return Some(SearchMatch {
             line: number,
-            column: 0,
             text: String::from_utf8_lossy(raw).into_owned(),
             ranges: Vec::new(),
             clipped_start: false,
@@ -563,9 +557,6 @@ fn finish_line(bytes: &[u8], line: Option<LineHits>, matchers: &Matchers) -> Opt
         .collect();
     Some(SearchMatch {
         line: number,
-        column: text[..text.floor_char_boundary(first)]
-            .encode_utf16()
-            .count(),
         text: text[clip_start..clip_end].to_string(),
         ranges,
         clipped_start: clip_start > 0,
@@ -645,7 +636,6 @@ mod tests {
             .collect::<Vec<_>>();
         assert_eq!(summary, [(1, 1, false), (3, 1, true), (4, 2, false)]);
         assert_eq!(matches[1].ranges, [[7, 19]]);
-        assert_eq!(matches[1].column, 7);
     }
 
     #[test]
@@ -677,7 +667,6 @@ mod tests {
         let item = &matches[0];
         assert!(item.clipped_start && item.clipped_end);
         assert_eq!(&item.text[item.ranges[0][0]..item.ranges[0][1]], "needle");
-        assert_eq!(item.column, 1000);
     }
 
     #[test]
