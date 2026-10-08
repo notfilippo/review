@@ -4,7 +4,7 @@ import {
   NEXT_FILE_KEYS,
   PREVIOUS_FILE_KEYS,
 } from "./constants.js";
-import createDiffsWorker from "https://esm.sh/@pierre/diffs@1.2.11/worker/worker-portable.js?worker";
+import createDiffsWorker from "https://esm.sh/@pierre/diffs@1.5.2/worker/worker-portable.js?worker";
 import {
   annotationsForFile,
   applyActiveSelection,
