@@ -1,6 +1,7 @@
 import {
   ArrowDown,
   ArrowUp,
+  CaseSensitive,
   Check,
   ChevronDown,
   ChevronRight,
@@ -12,9 +13,11 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   Pencil,
+  Regex,
   Rows2,
   Search,
   Trash2,
+  WholeWord,
   X,
   createElement,
 } from "lucide";
@@ -22,6 +25,7 @@ import {
 const icons = {
   ArrowDown,
   ArrowUp,
+  CaseSensitive,
   Check,
   ChevronDown,
   ChevronRight,
@@ -33,9 +37,11 @@ const icons = {
   PanelLeftClose,
   PanelLeftOpen,
   Pencil,
+  Regex,
   Rows2,
   Search,
   Trash2,
+  WholeWord,
   X,
 };
 

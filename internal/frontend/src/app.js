@@ -31,6 +31,7 @@ import {
   syncTreeToggle,
 } from "./layout.js";
 import { buildReviewFiles, fileCommentKey, orderFilesForTree } from "./patch-files.js";
+import { handleReferencesKey, setupReferences } from "./references.js";
 import { computeDiffStats, renderDiffStats } from "./stats.js";
 import {
   handleSearchKey,
@@ -77,8 +78,9 @@ async function init() {
     refreshSearchResults();
 
     setupTree(FileTree);
-    const workerManager = createDiffWorkerManager(getOrCreateWorkerPoolSingleton, state.files, getFiletypeFromFileName);
-    state.codeView = new CodeView(codeViewOptions(), workerManager);
+    state.workerManager = createDiffWorkerManager(getOrCreateWorkerPoolSingleton, state.files, getFiletypeFromFileName);
+    state.CodeView = CodeView;
+    state.codeView = new CodeView(codeViewOptions(), state.workerManager);
     els.diff.replaceChildren();
     state.codeView.setup(els.diff);
     renderDiffStats();
@@ -112,6 +114,7 @@ function bindActions() {
   syncCollapseToggle();
   setupSidebarTabs();
   setupSearch();
+  setupReferences();
   restoreSidebarWidth();
   setTreeCollapsed(isNarrowViewport());
   bindSidebarResizer();
@@ -131,7 +134,7 @@ function bindActions() {
     syncTreeToggle();
   });
   window.addEventListener("keydown", (event) => {
-    if (handleSearchKey(event)) {
+    if (handleReferencesKey(event) || handleSearchKey(event)) {
       return;
     }
     if (event.key === "Escape" && isNarrowViewport() && !state.treeCollapsed) {

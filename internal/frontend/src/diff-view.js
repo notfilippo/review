@@ -15,6 +15,7 @@ import {
 } from "./comments.js";
 import { setIconButton } from "./icons.js";
 import { syncCollapseToggle } from "./layout.js";
+import { referenceTokenOptions } from "./references.js";
 import { els, state } from "./state.js";
 import { syncTreeSelection } from "./tree.js";
 import { clamp, isEditableTarget, rem } from "./util.js";
@@ -76,6 +77,7 @@ export function codeViewOptions() {
     onLineSelectionEnd(range, context) {
       startDraft(context?.item?.id, range);
     },
+    ...referenceTokenOptions(),
   };
 }
 
@@ -87,6 +89,8 @@ export function createDiffWorkerManager(getOrCreateWorkerPoolSingleton, files, g
       },
       highlighterOptions: {
         theme: DIFF_THEME,
+        // Token click handlers need per-token markup from the worker.
+        useTokenTransformer: true,
         langs: languagesForFiles(files, getFiletypeFromFileName),
       },
     });

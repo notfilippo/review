@@ -49,9 +49,23 @@
               <span>Comments</span>
               <span id="comment-nav-summary" class="tab-count">0</span>
             </button>
+            <button id="refs-tab" class="sidebar-tab" type="button" role="tab" aria-selected="false" aria-controls="repo-search">
+              <span>Search</span>
+              <span id="refs-count" class="tab-count">0</span>
+            </button>
           </div>
           <div id="tree" class="tree sidebar-tab-panel" role="tabpanel" aria-labelledby="files-tab"></div>
           <div id="comment-nav" class="comment-nav sidebar-tab-panel" role="tabpanel" aria-labelledby="comments-tab" hidden></div>
+          <div id="repo-search" class="repo-search sidebar-tab-panel" role="tabpanel" aria-labelledby="refs-tab" hidden>
+            <form id="repo-search-form" class="repo-search-form" role="search">
+              <input id="repo-search-input" class="search-input" type="search" placeholder="Search repository" autocomplete="off" spellcheck="false" aria-label="Search repository">
+              <button id="repo-search-case" class="icon-button search-nav" type="button" aria-pressed="false"></button>
+              <button id="repo-search-word" class="icon-button search-nav" type="button" aria-pressed="false"></button>
+              <button id="repo-search-regex" class="icon-button search-nav" type="button" aria-pressed="false"></button>
+            </form>
+            <div id="repo-search-status" class="repo-search-status" aria-live="polite"></div>
+            <div id="repo-search-results" class="repo-search-results"></div>
+          </div>
           <div class="sidebar-panels">
             <details class="sidebar-pane" open>
               <summary>
@@ -73,6 +87,17 @@
               <span>Loading review</span>
             </div>
           </div>
+          <section id="peek" class="peek" aria-label="File preview" hidden>
+            <header class="peek-header">
+              <span id="peek-title" class="peek-title"></span>
+              <span class="peek-source" title="Files outside the review are read from the working copy">working copy</span>
+              <button id="peek-close" class="icon-button search-nav" type="button"></button>
+            </header>
+            <div class="peek-body">
+              <div id="peek-message" class="peek-message" hidden></div>
+              <div id="peek-view" class="diff peek-view"></div>
+            </div>
+          </section>
         </section>
       </main>
     </div>

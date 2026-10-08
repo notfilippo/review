@@ -103,7 +103,7 @@ function handleSearchInputKeyDown(event) {
 
 function isFindShortcut(event) {
   const key = event.key.toLowerCase();
-  return (event.metaKey || event.ctrlKey) && !event.altKey && key === "f";
+  return (event.metaKey || event.ctrlKey) && !event.altKey && !event.shiftKey && key === "f";
 }
 
 function focusSearchInput() {
@@ -111,7 +111,7 @@ function focusSearchInput() {
   els.searchInput.select();
 }
 
-function selectedSearchText() {
+export function selectedSearchText() {
   for (const selection of pageSelections()) {
     const text = normalizeSelectedText(selection?.toString());
     if (text) {
@@ -899,6 +899,10 @@ function unwrapElement(element) {
   }
   parent.removeChild(element);
   parent.normalize();
+}
+
+export function findRenderedLines(path, side, lineNumber) {
+  return findRenderedContentLineElements({ path, side, lineNumber });
 }
 
 function findRenderedContentLineElements(match) {

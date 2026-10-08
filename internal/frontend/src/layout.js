@@ -49,18 +49,21 @@ export function syncCollapseToggle() {
 export function setupSidebarTabs() {
   els.filesTab.addEventListener("click", () => setSidebarTab("files"));
   els.commentsTab.addEventListener("click", () => setSidebarTab("comments"));
+  els.refsTab.addEventListener("click", () => setSidebarTab("search"));
   setSidebarTab(state.sidebarTab);
 }
 
 export function setSidebarTab(tab) {
-  const nextTab = tab === "comments" ? "comments" : "files";
+  const nextTab = ["comments", "search"].includes(tab) ? tab : "files";
   state.sidebarTab = nextTab;
-  const commentsActive = nextTab === "comments";
-
-  els.filesTab.setAttribute("aria-selected", String(!commentsActive));
-  els.commentsTab.setAttribute("aria-selected", String(commentsActive));
-  els.tree.hidden = commentsActive;
-  els.commentNavigator.hidden = !commentsActive;
+  for (const [name, button, panel] of [
+    ["files", els.filesTab, els.tree],
+    ["comments", els.commentsTab, els.commentNavigator],
+    ["search", els.refsTab, els.repoSearch],
+  ]) {
+    button.setAttribute("aria-selected", String(name === nextTab));
+    panel.hidden = name !== nextTab;
+  }
 }
 
 export function bindSidebarResizer() {

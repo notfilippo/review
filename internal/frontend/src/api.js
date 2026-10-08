@@ -3,14 +3,15 @@ import { state } from "./state.js";
 const REQUEST_TIMEOUT_MS = 15000;
 
 export async function requestJSON(path, options = {}) {
+  const { timeoutMs = REQUEST_TIMEOUT_MS, ...fetchOptions } = options;
   const response = await fetch(path, {
-    ...options,
+    ...fetchOptions,
     headers: {
       "Content-Type": "application/json",
       "X-Review-Token": state.token,
-      ...(options.headers || {}),
+      ...(fetchOptions.headers || {}),
     },
-    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    signal: AbortSignal.timeout(timeoutMs),
   });
   if (!response.ok) {
     throw new Error(await responseErrorMessage(response));
