@@ -2127,6 +2127,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "ignore"
+version = "0.4.32"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0b17771570a2b94107741a7b033f19132c2eee21d59d21b24d2ced26500bd66e"
+dependencies = [
+ "crossbeam-deque",
+ "globset",
+ "log",
+ "memchr",
+ "regex-automata",
+ "same-file",
+ "walkdir",
+ "winapi-util",
+]
+
+[[package]]
 name = "include_dir"
 version = "0.7.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2783,9 +2799,11 @@ dependencies = [
  "getrandom",
  "gix 0.85.0",
  "hex",
+ "ignore",
  "include_dir",
  "jj-lib",
  "mime_guess",
+ "regex",
  "serde",
  "serde_json",
  "tokio",

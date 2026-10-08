@@ -5,6 +5,7 @@ mod git_backend;
 mod jj_backend;
 mod markdown;
 mod patch;
+mod search;
 mod server;
 mod vcs;
 
@@ -22,8 +23,9 @@ async fn main() {
 
 async fn run() -> Result<()> {
     let options = cli::parse()?;
-    let input = vcs::load_review_input(&options).await?;
-    let comments = server::serve_review(&options, input).await?;
+    let (root, input) = vcs::load_review_input(&options).await?;
+    let corpus = search::SearchCorpus::new(root, &input);
+    let comments = server::serve_review(&options, input, corpus).await?;
     let markdown = markdown::format_comments(&comments);
     std::io::stdout()
         .write_all(markdown.as_bytes())

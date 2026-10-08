@@ -112,7 +112,9 @@ pub struct RepoLocation {
     pub root: PathBuf,
 }
 
-pub async fn load_review_input(options: &CliOptions) -> Result<ReviewInput> {
+/// Returns the repository root alongside the review so callers can read files
+/// outside the diff.
+pub async fn load_review_input(options: &CliOptions) -> Result<(PathBuf, ReviewInput)> {
     let location = detect_repo(&options.cwd)?;
     let paths = normalize_path_filters(&location.root, &options.cwd, &options.paths)?;
     let input = match location.kind {
@@ -123,7 +125,7 @@ pub async fn load_review_input(options: &CliOptions) -> Result<ReviewInput> {
     if input.patch.trim().is_empty() {
         bail!("VCS diff is empty");
     }
-    Ok(input)
+    Ok((location.root, input))
 }
 
 pub fn build_review_input(patch: String, file_inputs: Vec<FileDiffInput>) -> ReviewInput {

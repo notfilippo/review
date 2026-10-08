@@ -18,6 +18,7 @@ use tokio::sync::Notify;
 use crate::cli::CliOptions;
 use crate::frontend;
 use crate::patch::PatchFile;
+use crate::search::{SearchCorpus, SearchRequest};
 use crate::vcs::{FileContext, ReviewComment, ReviewInput, normalize_comments};
 
 const TOKEN_BYTES: usize = 16;
@@ -26,6 +27,7 @@ const TOKEN_BYTES: usize = 16;
 struct ReviewSession {
     token: String,
     input: ReviewInput,
+    corpus: Arc<SearchCorpus>,
     comments: Arc<Mutex<Vec<ReviewComment>>>,
     done: Arc<Notify>,
     completed: Arc<AtomicBool>,
@@ -49,6 +51,11 @@ struct AuthQuery {
     token: Option<String>,
 }
 
+#[derive(Deserialize)]
+struct FileQuery {
+    path: String,
+}
+
 #[derive(Serialize)]
 struct ErrorResponse {
     error: String,
@@ -59,11 +66,16 @@ struct OkResponse {
     ok: bool,
 }
 
-pub async fn serve_review(options: &CliOptions, input: ReviewInput) -> Result<Vec<ReviewComment>> {
+pub async fn serve_review(
+    options: &CliOptions,
+    input: ReviewInput,
+    corpus: SearchCorpus,
+) -> Result<Vec<ReviewComment>> {
     let token = new_token().context("create review token")?;
     let session = Arc::new(ReviewSession {
         token,
         input,
+        corpus: Arc::new(corpus),
         comments: Arc::new(Mutex::new(Vec::new())),
         done: Arc::new(Notify::new()),
         completed: Arc::new(AtomicBool::new(false)),
@@ -117,6 +129,8 @@ fn routes(session: Arc<ReviewSession>) -> Router {
     Router::new()
         .route("/api/session", get(handle_session))
         .route("/api/comments", put(handle_comments))
+        .route("/api/search", get(handle_search))
+        .route("/api/file", get(handle_file))
         .route("/api/complete", post(handle_complete))
         .fallback(static_asset)
         .with_state(session)
@@ -150,6 +164,40 @@ async fn handle_session(
         comments: session.comments_snapshot(),
     })
     .into_response()
+}
+
+async fn handle_search(
+    State(session): State<Arc<ReviewSession>>,
+    Query(query): Query<AuthQuery>,
+    Query(request): Query<SearchRequest>,
+    headers: HeaderMap,
+) -> Response {
+    if !session.authorized(&headers, query.token.as_deref()) {
+        return error(StatusCode::UNAUTHORIZED, "unauthorized");
+    }
+    let corpus = session.corpus.clone();
+    match tokio::task::spawn_blocking(move || corpus.search(&request)).await {
+        Ok(Ok(response)) => Json(response).into_response(),
+        Ok(Err(err)) => error(StatusCode::BAD_REQUEST, &format!("{err:#}")),
+        Err(err) => error(StatusCode::INTERNAL_SERVER_ERROR, &err.to_string()),
+    }
+}
+
+async fn handle_file(
+    State(session): State<Arc<ReviewSession>>,
+    Query(query): Query<AuthQuery>,
+    Query(request): Query<FileQuery>,
+    headers: HeaderMap,
+) -> Response {
+    if !session.authorized(&headers, query.token.as_deref()) {
+        return error(StatusCode::UNAUTHORIZED, "unauthorized");
+    }
+    let corpus = session.corpus.clone();
+    match tokio::task::spawn_blocking(move || corpus.file(&request.path)).await {
+        Ok(Ok(response)) => Json(response).into_response(),
+        Ok(Err(err)) => error(StatusCode::NOT_FOUND, &format!("{err:#}")),
+        Err(err) => error(StatusCode::INTERNAL_SERVER_ERROR, &err.to_string()),
+    }
 }
 
 async fn handle_comments(
