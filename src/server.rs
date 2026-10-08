@@ -1,3 +1,4 @@
+use std::convert::Infallible;
 use std::net::SocketAddr;
 use std::process::Command;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -10,10 +11,11 @@ use axum::http::{HeaderMap, HeaderValue, Method, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post, put};
 use axum::{Json, Router};
+use futures_util::stream;
 use getrandom::fill;
 use serde::{Deserialize, Serialize};
 use tokio::net::TcpListener;
-use tokio::sync::Notify;
+use tokio::sync::{Notify, mpsc};
 
 use crate::cli::CliOptions;
 use crate::frontend;
@@ -22,6 +24,7 @@ use crate::search::{SearchCorpus, SearchRequest};
 use crate::vcs::{FileContext, ReviewComment, ReviewInput, normalize_comments};
 
 const TOKEN_BYTES: usize = 16;
+const SEARCH_EVENT_BUFFER: usize = 256;
 
 #[derive(Clone)]
 struct ReviewSession {
@@ -175,12 +178,27 @@ async fn handle_search(
     if !session.authorized(&headers, query.token.as_deref()) {
         return error(StatusCode::UNAUTHORIZED, "unauthorized");
     }
+    let search = match session.corpus.prepare(&request) {
+        Ok(search) => search,
+        Err(err) => return error(StatusCode::BAD_REQUEST, &format!("{err:#}")),
+    };
+    let (sender, receiver) = mpsc::channel(SEARCH_EVENT_BUFFER);
     let corpus = session.corpus.clone();
-    match tokio::task::spawn_blocking(move || corpus.search(&request)).await {
-        Ok(Ok(response)) => Json(response).into_response(),
-        Ok(Err(err)) => error(StatusCode::BAD_REQUEST, &format!("{err:#}")),
-        Err(err) => error(StatusCode::INTERNAL_SERVER_ERROR, &err.to_string()),
-    }
+    tokio::task::spawn_blocking(move || {
+        corpus.run(&search, &|event| sender.blocking_send(event).is_ok());
+    });
+    let lines = stream::unfold(receiver, |mut receiver| async move {
+        let event = receiver.recv().await?;
+        let mut line = serde_json::to_vec(&event).unwrap_or_default();
+        line.push(b'\n');
+        Some((Ok::<_, Infallible>(line), receiver))
+    });
+    let mut response = Response::new(Body::from_stream(lines));
+    response.headers_mut().insert(
+        axum::http::header::CONTENT_TYPE,
+        HeaderValue::from_static("application/x-ndjson"),
+    );
+    response
 }
 
 async fn handle_file(

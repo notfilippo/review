@@ -662,6 +662,19 @@ textarea {
   font-variant-numeric: tabular-nums;
 }
 
+.repo-search-stop {
+  min-height: 0;
+  padding: 0 var(--space-1);
+  border-color: transparent;
+  background: transparent;
+  color: var(--accent-2);
+  font-size: var(--font-size-xs);
+}
+
+.repo-search-stop:hover {
+  text-decoration: underline;
+}
+
 .repo-search-status[data-error="true"] {
   color: var(--danger);
 }

@@ -10,7 +10,6 @@ export const SIDEBAR_RESIZE_STEP = 16;
 export const MAX_SEARCH_MATCHES = 1000;
 export const REPO_SEARCH_DEBOUNCE_MS = 300;
 export const REPO_SEARCH_MIN_LIVE_LENGTH = 3;
-export const REPO_SEARCH_TIMEOUT_MS = 60000;
 export const DEFAULT_COMMENT_SIDE = "additions";
 export const TREE_STATUS_ADDED = "added";
 export const TREE_STATUS_DELETED = "deleted";

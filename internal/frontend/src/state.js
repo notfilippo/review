@@ -41,7 +41,7 @@ export const state = {
     loading: false,
     error: "",
     response: null,
-    requestId: 0,
+    controller: null,
     activeKey: "",
     collapsedFiles: new Set(),
   },

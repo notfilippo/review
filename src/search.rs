@@ -1,9 +1,8 @@
-use std::cmp::Reverse;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fs;
 use std::path::{Component, Path, PathBuf};
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use anyhow::{Context, Result, bail};
@@ -15,6 +14,7 @@ use crate::patch::FileStatus;
 use crate::vcs::ReviewInput;
 
 const MAX_MATCHES: usize = 2000;
+const PROGRESS_EVERY_FILES: usize = 5000;
 const MAX_FILE_BYTES: u64 = 4 * 1024 * 1024;
 const MAX_LINE_BYTES: usize = 400;
 const LINE_LEAD_BYTES: usize = 80;
@@ -32,6 +32,7 @@ pub struct SearchCorpus {
     root: PathBuf,
     overlay: HashMap<String, Arc<[u8]>>,
     shadowed: HashSet<String>,
+    scopes: Vec<Vec<String>>,
     generation: AtomicU64,
 }
 
@@ -46,9 +47,23 @@ pub struct SearchRequest {
     pub case_sensitive: Option<bool>,
 }
 
+/// One NDJSON line of a streamed search.
 #[derive(Debug, Serialize)]
-pub struct SearchResponse {
-    pub files: Vec<SearchFile>,
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum SearchEvent {
+    Scope {
+        dirs: Vec<String>,
+        searched_files: usize,
+    },
+    Progress {
+        searched_files: usize,
+    },
+    File(SearchFile),
+    Done(SearchSummary),
+}
+
+#[derive(Debug, Serialize)]
+pub struct SearchSummary {
     pub match_count: usize,
     pub searched_files: usize,
     pub truncated: bool,
@@ -60,7 +75,14 @@ pub struct SearchResponse {
 pub struct SearchFile {
     pub path: String,
     pub in_diff: bool,
+    /// 0 for diff files, then one more per directory level away from the diff.
+    pub distance: usize,
     pub matches: Vec<SearchMatch>,
+}
+
+pub struct PreparedSearch {
+    matchers: Matchers,
+    generation: u64,
 }
 
 #[derive(Debug, Serialize)]
@@ -95,12 +117,13 @@ struct LineHits {
     ranges: Vec<(usize, usize)>,
 }
 
-#[derive(Default)]
-struct SearchTotals {
-    files: Mutex<Vec<SearchFile>>,
+struct SearchRun<'a> {
+    emit: &'a (dyn Fn(SearchEvent) -> bool + Sync),
+    generation: u64,
     matches: AtomicUsize,
     searched_files: AtomicUsize,
     truncated: AtomicBool,
+    disconnected: AtomicBool,
 }
 
 impl SearchCorpus {
@@ -125,49 +148,110 @@ impl SearchCorpus {
                 );
             }
         }
+        let scopes = proximity_scopes(shadowed.iter().map(String::as_str));
         Self {
             root,
             overlay,
             shadowed,
+            scopes,
             generation: AtomicU64::new(0),
         }
     }
 
-    /// Runs one search. Starting a new search cancels any in-flight one so a
-    /// slow walk over a large repository cannot pile up behind fresh queries.
-    pub fn search(&self, request: &SearchRequest) -> Result<SearchResponse> {
-        let started = Instant::now();
-        let generation = self.generation.fetch_add(1, Ordering::SeqCst) + 1;
+    /// Validates a request and claims a new generation, which cancels any
+    /// in-flight search so slow walks cannot pile up behind fresh queries.
+    pub fn prepare(&self, request: &SearchRequest) -> Result<PreparedSearch> {
         let matchers = Matchers::new(request)?;
-        let totals = SearchTotals::default();
+        Ok(PreparedSearch {
+            matchers,
+            generation: self.generation.fetch_add(1, Ordering::SeqCst) + 1,
+        })
+    }
+
+    /// Streams matches nearest the diff first: diff files, their directories,
+    /// then each ancestor level up to the repository root. Large repositories
+    /// can take minutes to walk, so useful results must not wait for the end.
+    /// `emit` returns false once nobody is listening.
+    pub fn run(&self, search: &PreparedSearch, emit: &(dyn Fn(SearchEvent) -> bool + Sync)) {
+        let started = Instant::now();
+        let run = SearchRun {
+            emit,
+            generation: search.generation,
+            matches: AtomicUsize::new(0),
+            searched_files: AtomicUsize::new(0),
+            truncated: AtomicBool::new(false),
+            disconnected: AtomicBool::new(false),
+        };
 
         let mut overlay_paths = self.overlay.keys().collect::<Vec<_>>();
         overlay_paths.sort();
         for path in overlay_paths {
-            totals.record(
-                path,
-                true,
-                search_buffer(&self.overlay[path], &matchers),
-                MAX_MATCHES,
-            );
+            let matches = search_buffer(&self.overlay[path], &search.matchers);
+            run.record(path, true, 0, matches);
         }
 
-        let walker = WalkBuilder::new(&self.root)
+        let mut searched_dirs = HashSet::new();
+        for (index, dirs) in self.scopes.iter().enumerate() {
+            if self.should_stop(&run) {
+                break;
+            }
+            run.send(SearchEvent::Scope {
+                dirs: dirs.clone(),
+                searched_files: run.searched_files.load(Ordering::Relaxed),
+            });
+            self.walk_scope(dirs, &searched_dirs, index + 1, &search.matchers, &run);
+            searched_dirs.extend(dirs.iter().cloned());
+        }
+
+        run.send(SearchEvent::Done(SearchSummary {
+            match_count: run.matches.load(Ordering::Relaxed).min(MAX_MATCHES),
+            searched_files: run.searched_files.load(Ordering::Relaxed),
+            truncated: run.truncated.load(Ordering::Relaxed),
+            cancelled: self.generation.load(Ordering::SeqCst) != run.generation
+                || run.disconnected.load(Ordering::Relaxed),
+            elapsed_ms: started.elapsed().as_millis(),
+        }));
+    }
+
+    fn walk_scope(
+        &self,
+        dirs: &[String],
+        searched_dirs: &HashSet<String>,
+        distance: usize,
+        matchers: &Matchers,
+        run: &SearchRun,
+    ) {
+        let mut roots = dirs.iter().map(|dir| self.root.join(dir));
+        let Some(first) = roots.next() else {
+            return;
+        };
+        let mut builder = WalkBuilder::new(first);
+        for root in roots {
+            builder.add(root);
+        }
+        let root = self.root.clone();
+        let searched_dirs = searched_dirs.clone();
+        let walker = builder
             .hidden(false)
             .require_git(false)
             .max_filesize(Some(MAX_FILE_BYTES))
-            .filter_entry(|entry| {
-                !entry
+            .filter_entry(move |entry| {
+                if entry
                     .file_name()
                     .to_str()
                     .is_some_and(|name| SKIPPED_DIRS.contains(&name))
+                {
+                    return false;
+                }
+                // Inner scopes were walked by an earlier, closer pass.
+                !entry.file_type().is_some_and(|kind| kind.is_dir())
+                    || relative_path(&root, entry.path())
+                        .is_none_or(|path| !searched_dirs.contains(&path))
             })
             .build_parallel();
         walker.run(|| {
             Box::new(|entry| {
-                if self.generation.load(Ordering::SeqCst) != generation
-                    || totals.truncated.load(Ordering::Relaxed)
-                {
+                if self.should_stop(run) {
                     return WalkState::Quit;
                 }
                 let Ok(entry) = entry else {
@@ -185,32 +269,16 @@ impl SearchCorpus {
                 let Ok(bytes) = fs::read(entry.path()) else {
                     return WalkState::Continue;
                 };
-                totals.record(&path, false, search_buffer(&bytes, &matchers), MAX_MATCHES);
+                run.record(&path, false, distance, search_buffer(&bytes, matchers));
                 WalkState::Continue
             })
         });
+    }
 
-        let cancelled = self.generation.load(Ordering::SeqCst) != generation;
-        let mut files = totals.files.into_inner().expect("search mutex poisoned");
-        files.sort_by(|left, right| {
-            let rank = |file: &SearchFile| {
-                (
-                    Reverse(file.matches.iter().any(|item| item.definition)),
-                    Reverse(file.in_diff),
-                )
-            };
-            rank(left)
-                .cmp(&rank(right))
-                .then_with(|| left.path.cmp(&right.path))
-        });
-        Ok(SearchResponse {
-            files,
-            match_count: totals.matches.load(Ordering::Relaxed),
-            searched_files: totals.searched_files.load(Ordering::Relaxed),
-            truncated: totals.truncated.load(Ordering::Relaxed),
-            cancelled,
-            elapsed_ms: started.elapsed().as_millis(),
-        })
+    fn should_stop(&self, run: &SearchRun) -> bool {
+        self.generation.load(Ordering::SeqCst) != run.generation
+            || run.truncated.load(Ordering::Relaxed)
+            || run.disconnected.load(Ordering::Relaxed)
     }
 
     pub fn file(&self, path: &str) -> Result<FileResponse> {
@@ -256,31 +324,84 @@ impl SearchCorpus {
     }
 }
 
-impl SearchTotals {
-    fn record(&self, path: &str, in_diff: bool, matches: Vec<SearchMatch>, limit: usize) {
-        self.searched_files.fetch_add(1, Ordering::Relaxed);
+impl SearchRun<'_> {
+    fn record(&self, path: &str, in_diff: bool, distance: usize, mut matches: Vec<SearchMatch>) {
+        let searched = self.searched_files.fetch_add(1, Ordering::Relaxed) + 1;
+        if searched.is_multiple_of(PROGRESS_EVERY_FILES) {
+            self.send(SearchEvent::Progress {
+                searched_files: searched,
+            });
+        }
         if matches.is_empty() {
             return;
         }
         let previous = self.matches.fetch_add(matches.len(), Ordering::Relaxed);
-        if previous >= limit {
+        if previous >= MAX_MATCHES {
             self.truncated.store(true, Ordering::Relaxed);
             return;
         }
-        let mut matches = matches;
-        if previous + matches.len() >= limit {
-            matches.truncate(limit - previous);
+        if previous + matches.len() >= MAX_MATCHES {
+            matches.truncate(MAX_MATCHES - previous);
             self.truncated.store(true, Ordering::Relaxed);
         }
-        self.files
-            .lock()
-            .expect("search mutex poisoned")
-            .push(SearchFile {
-                path: path.to_string(),
-                in_diff,
-                matches,
-            });
+        self.send(SearchEvent::File(SearchFile {
+            path: path.to_string(),
+            in_diff,
+            distance,
+            matches,
+        }));
     }
+
+    fn send(&self, event: SearchEvent) {
+        if !(self.emit)(event) {
+            self.disconnected.store(true, Ordering::Relaxed);
+        }
+    }
+}
+
+/// Directory sets to walk, closest to the diff first. Each pass replaces a
+/// directory with its parent; the root waits for the last pass so a change to
+/// a top-level file does not turn the first pass into a full repository walk.
+fn proximity_scopes<'a>(paths: impl Iterator<Item = &'a str>) -> Vec<Vec<String>> {
+    let mut frontier = paths.map(parent_dir).collect::<BTreeSet<_>>();
+    if frontier.len() > 1 {
+        frontier.remove("");
+    }
+    let mut frontier = outermost_dirs(frontier);
+    let mut scopes = Vec::new();
+    while !frontier.is_empty() && frontier != [""] {
+        let mut next = frontier
+            .iter()
+            .map(|dir| parent_dir(dir))
+            .collect::<BTreeSet<_>>();
+        next.remove("");
+        scopes.push(frontier);
+        frontier = outermost_dirs(next);
+    }
+    scopes.push(vec![String::new()]);
+    scopes
+}
+
+fn parent_dir(path: &str) -> String {
+    path.rsplit_once('/').map_or("", |(dir, _)| dir).to_string()
+}
+
+/// Drops directories nested in another one of the set; walking the outer one
+/// already covers them.
+fn outermost_dirs(dirs: BTreeSet<String>) -> Vec<String> {
+    let mut kept: Vec<String> = Vec::new();
+    for dir in dirs {
+        let nested = kept.last().is_some_and(|outer| {
+            outer.is_empty()
+                || dir
+                    .strip_prefix(outer.as_str())
+                    .is_some_and(|rest| rest.starts_with('/'))
+        });
+        if !nested {
+            kept.push(dir);
+        }
+    }
+    kept
 }
 
 impl Matchers {
@@ -491,7 +612,16 @@ fn normalize_request_path(path: &str) -> Result<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Matchers, SearchRequest, normalize_request_path, search_buffer};
+    use std::fs;
+    use std::sync::Mutex;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    use super::{
+        Matchers, SearchCorpus, SearchEvent, SearchRequest, normalize_request_path,
+        proximity_scopes, search_buffer,
+    };
+    use crate::patch::{FileStatus, PatchFile};
+    use crate::vcs::{FileContents, FileContext, ReviewInput};
 
     fn request(q: &str, word: bool) -> SearchRequest {
         SearchRequest {
@@ -565,5 +695,112 @@ mod tests {
         for path in ["../secret", "/etc/passwd", "src/../../x", ".git/config", ""] {
             assert!(normalize_request_path(path).is_err(), "{path} should fail");
         }
+    }
+
+    #[test]
+    fn scopes_widen_from_the_diff_to_the_root() {
+        let scopes = proximity_scopes(
+            [
+                "svc/api/handler.go",
+                "svc/api/v2/routes.go",
+                "lib/x.go",
+                "go.mod",
+            ]
+            .into_iter(),
+        );
+        assert_eq!(
+            scopes,
+            [
+                vec!["lib".to_string(), "svc/api".to_string()],
+                vec!["svc".to_string()],
+                vec![String::new()],
+            ]
+        );
+        assert_eq!(
+            proximity_scopes(["README.md"].into_iter()),
+            [vec![String::new()]]
+        );
+        assert_eq!(proximity_scopes(std::iter::empty()), [vec![String::new()]]);
+    }
+
+    #[test]
+    fn run_streams_diff_files_then_nearest_directories() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("current time follows the Unix epoch")
+            .as_nanos();
+        let root =
+            std::env::temp_dir().join(format!("review-search-{}-{unique}", std::process::id()));
+        for (path, contents) in [
+            ("a/b/new.rs", "stale on disk: helper\n"),
+            ("a/b/sibling.rs", "helper();\n"),
+            ("a/cousin.rs", "helper();\n"),
+            ("far/away.rs", "helper();\n"),
+            ("ignored/skip.rs", "helper();\n"),
+            (".gitignore", "ignored/\n"),
+        ] {
+            let path = root.join(path);
+            fs::create_dir_all(path.parent().expect("test path has a parent"))
+                .expect("create test dir");
+            fs::write(path, contents).expect("write test file");
+        }
+        let input = ReviewInput {
+            patch: String::new(),
+            files: vec![PatchFile {
+                path: "a/b/new.rs".to_string(),
+                prev_path: None,
+                status: FileStatus::Added,
+            }],
+            file_contexts: vec![FileContext {
+                path: "a/b/new.rs".to_string(),
+                patch: String::new(),
+                old_file: FileContents {
+                    name: "a/b/new.rs".to_string(),
+                    contents: String::new(),
+                },
+                new_file: FileContents {
+                    name: "a/b/new.rs".to_string(),
+                    contents: "pub fn helper() {}\n".to_string(),
+                },
+            }],
+        };
+        let corpus = SearchCorpus::new(root.clone(), &input);
+        let search = corpus
+            .prepare(&request("helper", true))
+            .expect("prepare search");
+        let events = Mutex::new(Vec::new());
+        corpus.run(&search, &|event| {
+            events.lock().expect("events mutex").push(event);
+            true
+        });
+
+        let summary = events
+            .into_inner()
+            .expect("events mutex")
+            .into_iter()
+            .map(|event| match event {
+                SearchEvent::Scope { dirs, .. } => format!("scope {}", dirs.join(",")),
+                SearchEvent::File(file) => format!(
+                    "{} d{} def={}",
+                    file.path, file.distance, file.matches[0].definition
+                ),
+                SearchEvent::Progress { .. } => "progress".to_string(),
+                SearchEvent::Done(done) => format!("done {} {}", done.match_count, done.cancelled),
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            summary,
+            [
+                "a/b/new.rs d0 def=true",
+                "scope a/b",
+                "a/b/sibling.rs d1 def=false",
+                "scope a",
+                "a/cousin.rs d2 def=false",
+                "scope ",
+                "far/away.rs d3 def=false",
+                "done 4 false",
+            ]
+        );
+        fs::remove_dir_all(root).expect("remove test dir");
     }
 }

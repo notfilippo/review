@@ -79,3 +79,10 @@ uncommitted changes through the current worktree.
 ## UI
 
 The browser UI uses Pierre's [@pierre/diffs](https://www.npmjs.com/package/@pierre/diffs) and [@pierre/trees](https://www.npmjs.com/package/@pierre/trees) packages, loaded as native ESM modules through esm.sh.
+
+### Search
+
+- `⌘F` / `Ctrl+F` searches the diff.
+- `⌘`-click / `Ctrl`-click a symbol to find its references across the repository. `⌘⇧F` / `Ctrl+Shift+F` opens repository search with the current selection.
+- Results stream in nearest the diff first: diff files, their directories, then each parent directory up to the root. Likely definitions are tagged `def`.
+- Files in the diff are searched at the reviewed revision. Other files are read from the working copy and respect `.gitignore`. Click a result outside the diff to preview it.

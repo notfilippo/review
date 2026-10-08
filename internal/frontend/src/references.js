@@ -1,9 +1,8 @@
-import { requestJSON } from "./api.js";
+import { requestJSON, streamJSONLines } from "./api.js";
 import {
   DIFF_THEME,
   REPO_SEARCH_DEBOUNCE_MS,
   REPO_SEARCH_MIN_LIVE_LENGTH,
-  REPO_SEARCH_TIMEOUT_MS,
 } from "./constants.js";
 import { renderDiffs, setCurrentPath } from "./diff-view.js";
 import { createLucideIcon, setIconButton } from "./icons.js";
@@ -15,10 +14,12 @@ import { afterNextPaint } from "./util.js";
 const IDENTIFIER_PATTERN = /[\p{L}\p{N}_$]+/gu;
 const FLASH_BACKGROUND = "color-mix(in srgb, var(--accent-2) 30%, transparent)";
 const FLASH_MS = 1600;
+const STREAM_RENDER_MS = 120;
 const IS_MAC = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
 const MODIFIER_LABEL = IS_MAC ? "⌘" : "Ctrl";
 
 let debounceTimer;
+let renderTimer;
 let peekView;
 let underlinedToken;
 
@@ -210,10 +211,17 @@ async function runRepoSearch() {
     clearResults();
     return;
   }
-  const requestId = ++state.refs.requestId;
-  state.refs.loading = true;
-  state.refs.error = "";
-  renderStatus();
+  stopRepoSearch();
+  const controller = new AbortController();
+  state.refs.controller = controller;
+  Object.assign(state.refs, {
+    loading: true,
+    error: "",
+    activeKey: "",
+    collapsedFiles: new Set(),
+    response: { files: [], match_count: 0, searched_files: 0, scope: [], truncated: false, elapsed_ms: 0 },
+  });
+  renderResults();
 
   const params = new URLSearchParams({
     q: query,
@@ -222,28 +230,101 @@ async function runRepoSearch() {
     case_sensitive: String(state.refs.caseSensitive),
   });
   try {
-    const response = await requestJSON(`/api/search?${params}`, { timeoutMs: REPO_SEARCH_TIMEOUT_MS });
-    if (requestId !== state.refs.requestId || response.cancelled) {
-      return;
-    }
-    state.refs.response = response;
-    state.refs.activeKey = "";
-    state.refs.collapsedFiles = new Set();
+    await streamJSONLines(`/api/search?${params}`, {
+      signal: controller.signal,
+      onEvent: (event) => {
+        if (!controller.signal.aborted) {
+          applySearchEvent(event);
+        }
+      },
+    });
   } catch (error) {
-    if (requestId !== state.refs.requestId) {
+    if (controller.signal.aborted) {
       return;
     }
     state.refs.response = null;
     state.refs.error = error instanceof Error ? error.message : String(error);
   }
+  if (state.refs.controller === controller) {
+    state.refs.controller = null;
+    state.refs.loading = false;
+    renderResults();
+  }
+}
+
+function applySearchEvent(event) {
+  const response = state.refs.response;
+  switch (event.type) {
+    case "file":
+      insertSorted(response.files, event);
+      response.match_count += event.matches.length;
+      scheduleRender();
+      break;
+    case "scope":
+      response.scope = event.dirs;
+      response.searched_files = event.searched_files;
+      renderStatus();
+      break;
+    case "progress":
+      response.searched_files = event.searched_files;
+      renderStatus();
+      break;
+    case "done":
+      Object.assign(response, {
+        match_count: event.match_count,
+        searched_files: event.searched_files,
+        truncated: event.truncated,
+        elapsed_ms: event.elapsed_ms,
+      });
+      break;
+    default:
+      break;
+  }
+}
+
+// Files stream in nearest-first; definitions and diff files still lead so the
+// declaration is the first thing to read.
+function insertSorted(files, file) {
+  const rank = (item) => [
+    item.matches.some((match) => match.definition) ? 0 : 1,
+    item.in_diff ? 0 : 1,
+    item.distance,
+  ];
+  const key = rank(file);
+  const index = files.findIndex((other) => {
+    const otherKey = rank(other);
+    for (let i = 0; i < key.length; i += 1) {
+      if (key[i] !== otherKey[i]) {
+        return key[i] < otherKey[i];
+      }
+    }
+    return file.path < other.path;
+  });
+  files.splice(index === -1 ? files.length : index, 0, file);
+}
+
+function scheduleRender() {
+  if (renderTimer) {
+    return;
+  }
+  renderTimer = setTimeout(() => {
+    renderTimer = undefined;
+    renderResults();
+  }, STREAM_RENDER_MS);
+}
+
+function stopRepoSearch() {
+  if (state.refs.controller && state.refs.response) {
+    state.refs.response.stopped = true;
+  }
+  state.refs.controller?.abort();
+  state.refs.controller = null;
   state.refs.loading = false;
-  renderResults();
 }
 
 function clearResults() {
   clearTimeout(debounceTimer);
-  state.refs.requestId += 1;
-  state.refs.loading = false;
+  stopRepoSearch();
   state.refs.error = "";
   state.refs.response = null;
   renderResults();
@@ -274,29 +355,47 @@ function renderStatus() {
   const { loading, error, response } = state.refs;
   els.repoSearchStatus.dataset.error = String(Boolean(error));
   els.refsCount.textContent = response ? countLabel(response) : "0";
-  if (loading) {
-    els.repoSearchStatus.textContent = "Searching…";
-  } else if (error) {
-    els.repoSearchStatus.textContent = error;
+  if (error) {
+    els.repoSearchStatus.replaceChildren(error);
   } else if (response) {
-    els.repoSearchStatus.textContent = statusLabel(response);
+    els.repoSearchStatus.replaceChildren(statusLabel(response, loading));
+    if (loading) {
+      els.repoSearchStatus.append(stopButton());
+    }
   } else {
-    els.repoSearchStatus.textContent = "";
+    els.repoSearchStatus.replaceChildren();
   }
+}
+
+function stopButton() {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "repo-search-stop";
+  button.textContent = "Stop";
+  button.addEventListener("click", () => {
+    stopRepoSearch();
+    renderResults();
+  });
+  return button;
 }
 
 function countLabel(response) {
   return `${response.match_count}${response.truncated ? "+" : ""}`;
 }
 
-function statusLabel(response) {
-  if (response.files.length === 0) {
-    return `No results in ${response.searched_files} files`;
-  }
+function statusLabel(response, loading) {
   const lines = response.files.reduce((total, file) => total + file.matches.length, 0);
   const files = `${response.files.length} file${response.files.length === 1 ? "" : "s"}`;
-  const truncated = response.truncated ? ", truncated" : "";
-  return `${lines} line${lines === 1 ? "" : "s"} in ${files} · ${response.elapsed_ms} ms${truncated}`;
+  const found = `${lines} line${lines === 1 ? "" : "s"} in ${files}`;
+  const searched = `${response.searched_files.toLocaleString()} searched`;
+  if (loading) {
+    const scope = response.scope.length === 0 ? "diff" : response.scope.map((dir) => dir || "repository").join(", ");
+    return `${found} · ${searched} · in ${scope}… `;
+  }
+  const ending = response.stopped
+    ? " · stopped"
+    : ` · ${response.elapsed_ms.toLocaleString()} ms${response.truncated ? ", truncated" : ""}`;
+  return `${lines === 0 ? "No results" : found} · ${searched}${ending}`;
 }
 
 function emptyHint() {
