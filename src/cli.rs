@@ -88,7 +88,7 @@ pub fn parse() -> Result<CliOptions> {
     })
 }
 
-fn trim_optional(value: Option<String>) -> Option<String> {
+pub fn trim_optional(value: Option<String>) -> Option<String> {
     value
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty())

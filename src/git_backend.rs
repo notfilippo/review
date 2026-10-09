@@ -12,7 +12,9 @@ use gix::remote::Direction;
 use gix::status::UntrackedFiles;
 
 use crate::cli::CliOptions;
-use crate::diff::{FileDiffInput, FileSnapshot};
+use crate::diff::{
+    FileDiffInput, FileSnapshot, MODE_EXECUTABLE, MODE_FILE, MODE_SUBMODULE, MODE_SYMLINK,
+};
 use crate::vcs::{ReviewInput, build_review_input};
 
 #[derive(Clone, Debug)]
@@ -80,7 +82,7 @@ fn worktree_review(
     paths: &[String],
 ) -> Result<ReviewInput> {
     let from = resolve_commit(repo, from_rev)?;
-    let old_entries = collect_tree_entries(&from.tree()?, paths)?;
+    let old_entries = collect_tree_entries(&from.tree().context("read --from tree")?, paths)?;
     let head = repo.head().context("resolve HEAD")?;
     let head_entries = if head.is_unborn() {
         BTreeMap::new()
@@ -89,7 +91,7 @@ fn worktree_review(
         collect_tree_entries(&head.tree().context("read HEAD tree")?, paths)?
     };
     let new_entries = collect_worktree_entries(repo, root, head_entries, paths)?;
-    let files = compare_entries(repo, &old_entries, &new_entries, paths)?;
+    let files = compare_entries(repo, &old_entries, &new_entries)?;
     Ok(build_review_input(files))
 }
 
@@ -118,13 +120,13 @@ fn default_worktree_review(
         (old_entries, head_entries)
     };
     let new_entries = collect_worktree_entries(repo, root, head_entries, paths)?;
-    let files = compare_entries(repo, &old_entries, &new_entries, paths)?;
+    let files = compare_entries(repo, &old_entries, &new_entries)?;
     Ok(build_review_input(files))
 }
 
 fn commit_review(repo: &gix::Repository, revision: &str, paths: &[String]) -> Result<ReviewInput> {
     let commit = resolve_commit(repo, revision)?;
-    let parents = parent_ids(&commit);
+    let parents = commit.parent_ids().collect::<Vec<_>>();
     if parents.len() > 1 {
         bail!(
             "git merge commits are not supported for review: {}",
@@ -133,12 +135,12 @@ fn commit_review(repo: &gix::Repository, revision: &str, paths: &[String]) -> Re
     }
     let old_entries = if let Some(parent_id) = parents.first() {
         let parent = parent_id.object()?.try_into_commit()?;
-        collect_tree_entries(&parent.tree()?, paths)?
+        collect_tree_entries(&parent.tree().context("read parent tree")?, paths)?
     } else {
         BTreeMap::new()
     };
-    let new_entries = collect_tree_entries(&commit.tree()?, paths)?;
-    let files = compare_entries(repo, &old_entries, &new_entries, paths)?;
+    let new_entries = collect_tree_entries(&commit.tree().context("read commit tree")?, paths)?;
+    let files = compare_entries(repo, &old_entries, &new_entries)?;
     Ok(build_review_input(files))
 }
 
@@ -150,9 +152,9 @@ fn range_review(
 ) -> Result<ReviewInput> {
     let from = resolve_commit(repo, from_rev)?;
     let to = resolve_commit(repo, to_rev)?;
-    let old_entries = collect_tree_entries(&from.tree()?, paths)?;
-    let new_entries = collect_tree_entries(&to.tree()?, paths)?;
-    let files = compare_entries(repo, &old_entries, &new_entries, paths)?;
+    let old_entries = collect_tree_entries(&from.tree().context("read --from tree")?, paths)?;
+    let new_entries = collect_tree_entries(&to.tree().context("read --to tree")?, paths)?;
+    let files = compare_entries(repo, &old_entries, &new_entries)?;
     Ok(build_review_input(files))
 }
 
@@ -300,8 +302,9 @@ fn read_worktree_file_entry(
     };
     let (mode, contents) = if metadata.file_type().is_symlink() {
         (
-            "120000".to_string(),
-            fs::read_link(&full_path)?
+            MODE_SYMLINK.to_string(),
+            fs::read_link(&full_path)
+                .with_context(|| format!("read symlink {}", full_path.display()))?
                 .to_string_lossy()
                 .to_string()
                 .into_bytes(),
@@ -313,7 +316,7 @@ fn read_worktree_file_entry(
                 index_entry.map(|entry| entry.mode),
                 executable_bit,
             ),
-            fs::read(&full_path)?,
+            fs::read(&full_path).with_context(|| format!("read {}", full_path.display()))?,
         )
     } else {
         return Ok(None);
@@ -329,7 +332,6 @@ fn compare_entries(
     repo: &gix::Repository,
     old_entries: &BTreeMap<String, FileEntry>,
     new_entries: &BTreeMap<String, FileEntry>,
-    paths: &[String],
 ) -> Result<Vec<FileDiffInput>> {
     let keys = old_entries
         .keys()
@@ -338,9 +340,6 @@ fn compare_entries(
         .collect::<BTreeSet<_>>();
     let mut files = Vec::new();
     for path in keys {
-        if !path_allowed(&path, paths) {
-            continue;
-        }
         let old = old_entries.get(&path);
         let new = new_entries.get(&path);
         if old == new {
@@ -360,7 +359,7 @@ fn file_snapshot(repo: &gix::Repository, entry: &FileEntry) -> Result<FileSnapsh
     let id = entry.id();
     let contents = match &entry.source {
         FileSource::Inline { contents, .. } => contents.clone(),
-        FileSource::Object(_) if entry.mode == "160000" => id.to_string().into_bytes(),
+        FileSource::Object(_) if entry.mode == MODE_SUBMODULE => id.to_string().into_bytes(),
         FileSource::Object(_) => repo.find_object(id)?.try_into_blob()?.data.clone(),
     };
     Ok(FileSnapshot {
@@ -374,10 +373,13 @@ fn resolve_commit<'repo>(
     repo: &'repo gix::Repository,
     revision: &str,
 ) -> Result<gix::Commit<'repo>> {
-    Ok(repo
-        .rev_parse_single(revision.as_bytes().as_bstr())?
-        .object()?
-        .peel_to_commit()?)
+    let resolve = || -> Result<gix::Commit<'repo>> {
+        Ok(repo
+            .rev_parse_single(revision.as_bytes().as_bstr())?
+            .object()?
+            .peel_to_commit()?)
+    };
+    resolve().with_context(|| format!("resolve git revision {revision:?}"))
 }
 
 fn resolve_default_base_commit<'repo>(
@@ -412,10 +414,6 @@ fn default_remote_name(repo: &gix::Repository) -> Result<Option<String>> {
     Ok(None)
 }
 
-fn parent_ids<'repo>(commit: &gix::Commit<'repo>) -> Vec<gix::Id<'repo>> {
-    commit.parent_ids().collect()
-}
-
 fn mode_string(mode: EntryMode) -> String {
     format!("{:06o}", mode.value())
 }
@@ -424,11 +422,13 @@ fn index_mode_string(mode: IndexMode) -> String {
     format!("{:06o}", mode.bits())
 }
 
+/// Whether `path` is one of the review's path filters or inside one.
 fn path_allowed(path: &str, paths: &[String]) -> bool {
     paths.is_empty()
-        || paths
-            .iter()
-            .any(|filter| path == filter || path.starts_with(&format!("{filter}/")))
+        || paths.iter().any(|filter| {
+            path.strip_prefix(filter.as_str())
+                .is_some_and(|rest| rest.is_empty() || rest.starts_with('/'))
+        })
 }
 
 fn path_may_match_dir(path: &str, paths: &[String]) -> bool {
@@ -447,15 +447,12 @@ fn worktree_file_mode(
     executable_bit: bool,
 ) -> String {
     if !executable_bit {
-        return index_mode
-            .filter(|mode| matches!(*mode, IndexMode::FILE | IndexMode::FILE_EXECUTABLE))
-            .map(index_mode_string)
-            .unwrap_or_else(|| "100644".to_string());
+        return index_file_mode(index_mode);
     }
     if metadata.permissions().mode() & 0o111 != 0 {
-        "100755".to_string()
+        MODE_EXECUTABLE.to_string()
     } else {
-        "100644".to_string()
+        MODE_FILE.to_string()
     }
 }
 
@@ -465,8 +462,13 @@ fn worktree_file_mode(
     index_mode: Option<IndexMode>,
     _executable_bit: bool,
 ) -> String {
+    index_file_mode(index_mode)
+}
+
+/// Without a trustworthy executable bit, keep whatever mode Git recorded.
+fn index_file_mode(index_mode: Option<IndexMode>) -> String {
     index_mode
         .filter(|mode| matches!(*mode, IndexMode::FILE | IndexMode::FILE_EXECUTABLE))
         .map(index_mode_string)
-        .unwrap_or_else(|| "100644".to_string())
+        .unwrap_or_else(|| MODE_FILE.to_string())
 }

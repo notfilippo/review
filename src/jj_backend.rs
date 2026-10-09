@@ -9,17 +9,20 @@ use futures_util::io::AsyncReadExt;
 use jj_lib::backend::{CommitId, TreeValue};
 use jj_lib::commit::Commit;
 use jj_lib::config::StackedConfig;
-use jj_lib::matchers::EverythingMatcher;
+use jj_lib::matchers::{EverythingMatcher, Matcher, PrefixMatcher};
 use jj_lib::merged_tree::MergedTree;
 use jj_lib::object_id::ObjectId;
 use jj_lib::repo::{ReadonlyRepo, Repo, StoreFactories};
-use jj_lib::repo_path::RepoPath;
+use jj_lib::repo_path::{RepoPath, RepoPathBuf};
 use jj_lib::rewrite::merge_commit_trees;
 use jj_lib::settings::UserSettings;
 use jj_lib::workspace::{Workspace, default_working_copy_factories};
 
 use crate::cli::CliOptions;
-use crate::diff::{FileDiffInput, FileSnapshot};
+use crate::diff::{
+    FileDiffInput, FileSnapshot, MODE_EXECUTABLE, MODE_FILE, MODE_SUBMODULE, MODE_SYMLINK,
+    MODE_TREE,
+};
 use crate::vcs::{ReviewInput, build_review_input};
 
 const DEFAULT_REVIEW_REVSET: &str = "trunk()..@";
@@ -158,16 +161,23 @@ async fn diff_trees(
     new_tree: &MergedTree,
     paths: &[String],
 ) -> Result<Vec<FileDiffInput>> {
-    let matcher = EverythingMatcher;
-    let mut stream = old_tree.diff_stream(new_tree, &matcher);
+    // Restricting the walk itself keeps path-limited reviews of big trees cheap.
+    let matcher: Box<dyn Matcher> = if paths.is_empty() {
+        Box::new(EverythingMatcher)
+    } else {
+        let prefixes = paths
+            .iter()
+            .map(|path| RepoPathBuf::from_internal_string(path.as_str()))
+            .collect::<Result<Vec<_>, _>>()
+            .context("parse path filters")?;
+        Box::new(PrefixMatcher::new(prefixes))
+    };
+    let mut stream = old_tree.diff_stream(new_tree, matcher.as_ref());
     let mut files = Vec::new();
     while let Some(entry) = stream.next().await {
         let values = entry.values?;
         let path = entry.path;
         let path_string = path.as_internal_file_string().to_string();
-        if !path_allowed(&path_string, paths) {
-            continue;
-        }
         let old_value = values
             .before
             .into_resolved()
@@ -196,11 +206,20 @@ async fn materialize_tree_value(
     };
     match value {
         TreeValue::File { id, executable, .. } => {
-            let mut reader = tree.store().read_file(path, &id).await?;
+            let mut reader = tree
+                .store()
+                .read_file(path, &id)
+                .await
+                .with_context(|| format!("read {}", path.as_internal_file_string()))?;
             let mut contents = Vec::new();
             reader.read_to_end(&mut contents).await?;
             Ok(Some(FileSnapshot {
-                mode: if executable { "100755" } else { "100644" }.to_string(),
+                mode: if executable {
+                    MODE_EXECUTABLE
+                } else {
+                    MODE_FILE
+                }
+                .to_string(),
                 hash: id.hex(),
                 contents,
             }))
@@ -208,18 +227,18 @@ async fn materialize_tree_value(
         TreeValue::Symlink(id) => {
             let target = tree.store().read_symlink(path, &id).await?;
             Ok(Some(FileSnapshot {
-                mode: "120000".to_string(),
+                mode: MODE_SYMLINK.to_string(),
                 hash: id.hex(),
                 contents: target.into_bytes(),
             }))
         }
         TreeValue::GitSubmodule(id) => Ok(Some(FileSnapshot {
-            mode: "160000".to_string(),
+            mode: MODE_SUBMODULE.to_string(),
             hash: id.hex(),
             contents: id.hex().into_bytes(),
         })),
         TreeValue::Tree(id) => Ok(Some(FileSnapshot {
-            mode: "040000".to_string(),
+            mode: MODE_TREE.to_string(),
             hash: id.hex(),
             contents: Vec::new(),
         })),
@@ -364,11 +383,4 @@ async fn resolve_revset(
         commits.push(repo.store().get_commit_async(&commit_id).await?);
     }
     Ok(commits)
-}
-
-fn path_allowed(path: &str, paths: &[String]) -> bool {
-    paths.is_empty()
-        || paths
-            .iter()
-            .any(|filter| path == filter || path.starts_with(&format!("{filter}/")))
 }

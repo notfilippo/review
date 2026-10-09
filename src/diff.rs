@@ -3,6 +3,12 @@ use jj_lib::diff_presentation::LineCompareMode;
 use jj_lib::diff_presentation::unified::{DiffLineType, unified_diff_hunks};
 use jj_lib::merge::Diff;
 
+pub const MODE_FILE: &str = "100644";
+pub const MODE_EXECUTABLE: &str = "100755";
+pub const MODE_SYMLINK: &str = "120000";
+pub const MODE_SUBMODULE: &str = "160000";
+pub const MODE_TREE: &str = "040000";
+
 #[derive(Clone, Debug)]
 pub struct FileSnapshot {
     pub mode: String,

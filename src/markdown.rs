@@ -14,12 +14,8 @@ pub fn format_comments(comments: &[ReviewComment]) -> String {
             "- `{}` {}: {}",
             comment.path,
             comment.location(),
-            comment_text(&comment.text)
+            comment.text.replace('\n', "\n  ")
         );
     }
     markdown
-}
-
-fn comment_text(text: &str) -> String {
-    text.trim().replace('\n', "\n  ")
 }

@@ -4,7 +4,7 @@ use std::path::{Component, Path, PathBuf};
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 
-use crate::cli::CliOptions;
+use crate::cli::{CliOptions, trim_optional};
 use crate::diff::{FileDiffInput, FileSnapshot, render_file_patch};
 use crate::{git_backend, jj_backend};
 
@@ -108,15 +108,15 @@ pub fn normalize_comments(comments: Vec<ReviewComment>) -> Vec<ReviewComment> {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum VcsKind {
+enum VcsKind {
     Jj,
     Git,
 }
 
 #[derive(Clone, Debug)]
-pub struct RepoLocation {
-    pub kind: VcsKind,
-    pub root: PathBuf,
+struct RepoLocation {
+    kind: VcsKind,
+    root: PathBuf,
 }
 
 /// Returns the repository root alongside the review so callers can read files
@@ -274,12 +274,6 @@ fn snapshot_contents(snapshot: Option<&FileSnapshot>) -> String {
     snapshot
         .map(|snapshot| String::from_utf8_lossy(&snapshot.contents).to_string())
         .unwrap_or_default()
-}
-
-fn trim_optional(value: Option<String>) -> Option<String> {
-    value
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty())
 }
 
 #[cfg(test)]
