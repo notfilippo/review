@@ -1,5 +1,5 @@
 use anyhow::Result;
-use bstr::{BString, ByteSlice};
+use bstr::ByteSlice;
 use jj_lib::diff_presentation::LineCompareMode;
 use jj_lib::diff_presentation::unified::{DiffLineType, unified_diff_hunks};
 use jj_lib::merge::Diff;
@@ -111,10 +111,8 @@ fn render_file_patch(out: &mut String, file: &FileDiffInput) -> Result<()> {
     out.push_str(&null_or_prefixed("b/", display_new, file.new.is_some()));
     out.push('\n');
 
-    let old_bstr = BString::new(old_contents.to_vec());
-    let new_bstr = BString::new(new_contents.to_vec());
     for hunk in unified_diff_hunks(
-        Diff::new(old_bstr.as_bstr(), new_bstr.as_bstr()),
+        Diff::new(old_contents.as_bstr(), new_contents.as_bstr()),
         3,
         LineCompareMode::Exact,
     ) {
