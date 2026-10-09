@@ -1,13 +1,13 @@
 use std::convert::Infallible;
 use std::net::SocketAddr;
 use std::process::Command;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use anyhow::{Context, Result, bail};
 use axum::body::Body;
 use axum::extract::{Query, Request, State};
 use axum::http::{HeaderMap, HeaderValue, Method, StatusCode};
+use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post, put};
 use axum::{Json, Router};
@@ -28,10 +28,9 @@ const SEARCH_EVENT_BUFFER: usize = 256;
 struct ReviewSession {
     token: String,
     input: ReviewInput,
-    corpus: Arc<SearchCorpus>,
-    comments: Arc<Mutex<Vec<ReviewComment>>>,
-    done: Arc<Notify>,
-    completed: Arc<AtomicBool>,
+    corpus: SearchCorpus,
+    comments: Mutex<Vec<ReviewComment>>,
+    done: Notify,
 }
 
 #[derive(Serialize)]
@@ -74,10 +73,9 @@ pub async fn serve_review(
     let session = Arc::new(ReviewSession {
         token,
         input,
-        corpus: Arc::new(corpus),
-        comments: Arc::new(Mutex::new(Vec::new())),
-        done: Arc::new(Notify::new()),
-        completed: Arc::new(AtomicBool::new(false)),
+        corpus,
+        comments: Mutex::new(Vec::new()),
+        done: Notify::new(),
     });
 
     let listener = bind_listener(options).await?;
@@ -125,14 +123,32 @@ pub async fn serve_review(
 }
 
 fn routes(session: Arc<ReviewSession>) -> Router {
-    Router::new()
+    let api = Router::new()
         .route("/api/session", get(handle_session))
         .route("/api/comments", put(handle_comments))
         .route("/api/search", get(handle_search))
         .route("/api/file", get(handle_file))
         .route("/api/complete", post(handle_complete))
-        .fallback(static_asset)
-        .with_state(session)
+        .route_layer(middleware::from_fn_with_state(
+            session.clone(),
+            require_token,
+        ));
+    api.fallback(static_asset).with_state(session)
+}
+
+/// Any local process can reach the port, so every API call must present the
+/// token that was only printed to the terminal and opened in the browser.
+async fn require_token(
+    State(session): State<Arc<ReviewSession>>,
+    Query(query): Query<AuthQuery>,
+    headers: HeaderMap,
+    request: Request,
+    next: Next,
+) -> Response {
+    if !session.authorized(&headers, query.token.as_deref()) {
+        return error(StatusCode::UNAUTHORIZED, "unauthorized");
+    }
+    next.run(request).await
 }
 
 async fn bind_listener(options: &CliOptions) -> Result<TcpListener> {
@@ -147,14 +163,7 @@ async fn bind_listener(options: &CliOptions) -> Result<TcpListener> {
     }
 }
 
-async fn handle_session(
-    State(session): State<Arc<ReviewSession>>,
-    Query(query): Query<AuthQuery>,
-    headers: HeaderMap,
-) -> Response {
-    if !session.authorized(&headers, query.token.as_deref()) {
-        return error(StatusCode::UNAUTHORIZED, "unauthorized");
-    }
+async fn handle_session(State(session): State<Arc<ReviewSession>>) -> Response {
     Json(SessionResponse {
         files: &session.input.files,
         comments: session.comments_snapshot(),
@@ -164,21 +173,17 @@ async fn handle_session(
 
 async fn handle_search(
     State(session): State<Arc<ReviewSession>>,
-    Query(query): Query<AuthQuery>,
     Query(request): Query<SearchRequest>,
-    headers: HeaderMap,
 ) -> Response {
-    if !session.authorized(&headers, query.token.as_deref()) {
-        return error(StatusCode::UNAUTHORIZED, "unauthorized");
-    }
     let search = match session.corpus.prepare(&request) {
         Ok(search) => search,
         Err(err) => return error(StatusCode::BAD_REQUEST, &format!("{err:#}")),
     };
     let (sender, receiver) = mpsc::channel(SEARCH_EVENT_BUFFER);
-    let corpus = session.corpus.clone();
     tokio::task::spawn_blocking(move || {
-        corpus.run(&search, &|event| sender.blocking_send(event).is_ok());
+        session
+            .corpus
+            .run(&search, &|event| sender.blocking_send(event).is_ok());
     });
     let lines = stream::unfold(receiver, |mut receiver| async move {
         let event = receiver.recv().await?;
@@ -196,15 +201,9 @@ async fn handle_search(
 
 async fn handle_file(
     State(session): State<Arc<ReviewSession>>,
-    Query(query): Query<AuthQuery>,
     Query(request): Query<FileQuery>,
-    headers: HeaderMap,
 ) -> Response {
-    if !session.authorized(&headers, query.token.as_deref()) {
-        return error(StatusCode::UNAUTHORIZED, "unauthorized");
-    }
-    let corpus = session.corpus.clone();
-    match tokio::task::spawn_blocking(move || corpus.file(&request.path)).await {
+    match tokio::task::spawn_blocking(move || session.corpus.file(&request.path)).await {
         Ok(Ok(response)) => Json(response).into_response(),
         Ok(Err(err)) => error(StatusCode::NOT_FOUND, &format!("{err:#}")),
         Err(err) => error(StatusCode::INTERNAL_SERVER_ERROR, &err.to_string()),
@@ -213,35 +212,22 @@ async fn handle_file(
 
 async fn handle_comments(
     State(session): State<Arc<ReviewSession>>,
-    Query(query): Query<AuthQuery>,
-    headers: HeaderMap,
     Json(request): Json<CommentsRequest>,
 ) -> Response {
-    if !session.authorized(&headers, query.token.as_deref()) {
-        return error(StatusCode::UNAUTHORIZED, "unauthorized");
-    }
     session.replace_comments(request.comments);
     Json(OkResponse { ok: true }).into_response()
 }
 
-async fn handle_complete(
-    State(session): State<Arc<ReviewSession>>,
-    Query(query): Query<AuthQuery>,
-    headers: HeaderMap,
-    body: String,
-) -> Response {
-    if !session.authorized(&headers, query.token.as_deref()) {
-        return error(StatusCode::UNAUTHORIZED, "unauthorized");
-    }
+async fn handle_complete(State(session): State<Arc<ReviewSession>>, body: String) -> Response {
     if !body.trim().is_empty() {
         match serde_json::from_str::<CommentsRequest>(&body) {
             Ok(request) => session.replace_comments(request.comments),
             Err(err) => return error(StatusCode::BAD_REQUEST, &err.to_string()),
         }
     }
-    if !session.completed.swap(true, Ordering::SeqCst) {
-        session.done.notify_waiters();
-    }
+    // notify_one stores a permit, so completion is not lost if it races
+    // ahead of the main task starting to wait.
+    session.done.notify_one();
     Json(OkResponse { ok: true }).into_response()
 }
 
