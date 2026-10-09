@@ -49,7 +49,7 @@ export function syncCollapseToggle() {
 export function setupSidebarTabs() {
   els.filesTab.addEventListener("click", () => setSidebarTab("files"));
   els.commentsTab.addEventListener("click", () => setSidebarTab("comments"));
-  els.refsTab.addEventListener("click", () => setSidebarTab("search"));
+  els.searchTab.addEventListener("click", () => setSidebarTab("search"));
   setSidebarTab(state.sidebarTab);
 }
 
@@ -59,7 +59,7 @@ export function setSidebarTab(tab) {
   for (const [name, button, panel] of [
     ["files", els.filesTab, els.tree],
     ["comments", els.commentsTab, els.commentNavigator],
-    ["search", els.refsTab, els.repoSearch],
+    ["search", els.searchTab, els.searchPanel],
   ]) {
     button.setAttribute("aria-selected", String(name === nextTab));
     panel.hidden = name !== nextTab;

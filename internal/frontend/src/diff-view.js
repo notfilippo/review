@@ -15,7 +15,7 @@ import {
 } from "./comments.js";
 import { setIconButton } from "./icons.js";
 import { syncCollapseToggle } from "./layout.js";
-import { referenceTokenOptions } from "./references.js";
+import { referenceTokenOptions } from "./search.js";
 import { els, state } from "./state.js";
 import { syncTreeSelection } from "./tree.js";
 import { clamp, isEditableTarget, rem } from "./util.js";

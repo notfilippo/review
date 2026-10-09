@@ -31,7 +31,8 @@ import {
   syncTreeToggle,
 } from "./layout.js";
 import { buildReviewFiles, fileCommentKey, orderFilesForTree } from "./patch-files.js";
-import { handleReferencesKey, setupReferences } from "./references.js";
+import { handlePeekKey } from "./peek.js";
+import { handleSearchKey, setupSearch } from "./search.js";
 import { computeDiffStats, renderDiffStats } from "./stats.js";
 import { els, narrowViewportQuery, state } from "./state.js";
 import { readSavedDiffStyle, writeStorageValue } from "./storage.js";
@@ -107,7 +108,7 @@ function bindActions() {
   syncLayoutToggle();
   syncCollapseToggle();
   setupSidebarTabs();
-  setupReferences();
+  setupSearch();
   restoreSidebarWidth();
   setTreeCollapsed(isNarrowViewport());
   bindSidebarResizer();
@@ -127,7 +128,7 @@ function bindActions() {
     syncTreeToggle();
   });
   window.addEventListener("keydown", (event) => {
-    if (handleReferencesKey(event)) {
+    if (handleSearchKey(event) || handlePeekKey(event)) {
       return;
     }
     if (event.key === "Escape" && isNarrowViewport() && !state.treeCollapsed) {

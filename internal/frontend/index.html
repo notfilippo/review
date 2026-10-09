@@ -42,22 +42,22 @@
               <span>Comments</span>
               <span id="comment-nav-summary" class="tab-count">0</span>
             </button>
-            <button id="refs-tab" class="sidebar-tab" type="button" role="tab" aria-selected="false" aria-controls="repo-search">
+            <button id="search-tab" class="sidebar-tab" type="button" role="tab" aria-selected="false" aria-controls="search-panel">
               <span>Search</span>
-              <span id="refs-count" class="tab-count">0</span>
+              <span id="search-count" class="tab-count">0</span>
             </button>
           </div>
           <div id="tree" class="tree sidebar-tab-panel" role="tabpanel" aria-labelledby="files-tab"></div>
           <div id="comment-nav" class="comment-nav sidebar-tab-panel" role="tabpanel" aria-labelledby="comments-tab" hidden></div>
-          <div id="repo-search" class="repo-search sidebar-tab-panel" role="tabpanel" aria-labelledby="refs-tab" hidden>
-            <form id="repo-search-form" class="repo-search-form" role="search">
-              <input id="repo-search-input" type="search" placeholder="Search repository" autocomplete="off" spellcheck="false" aria-label="Search repository">
-              <button id="repo-search-case" class="icon-button" type="button" aria-pressed="false"></button>
-              <button id="repo-search-word" class="icon-button" type="button" aria-pressed="false"></button>
-              <button id="repo-search-regex" class="icon-button" type="button" aria-pressed="false"></button>
+          <div id="search-panel" class="search-panel sidebar-tab-panel" role="tabpanel" aria-labelledby="search-tab" hidden>
+            <form id="search-form" class="search-form" role="search">
+              <input id="search-input" type="search" placeholder="Search repository" autocomplete="off" spellcheck="false" aria-label="Search repository">
+              <button id="search-case" class="icon-button" type="button" aria-pressed="false"></button>
+              <button id="search-word" class="icon-button" type="button" aria-pressed="false"></button>
+              <button id="search-regex" class="icon-button" type="button" aria-pressed="false"></button>
             </form>
-            <div id="repo-search-status" class="repo-search-status" aria-live="polite"></div>
-            <div id="repo-search-results" class="repo-search-results"></div>
+            <div id="search-status" class="search-status" aria-live="polite"></div>
+            <div id="search-results" class="search-results"></div>
           </div>
           <div class="sidebar-panels">
             <details class="sidebar-pane" open>

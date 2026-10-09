@@ -1,14 +1,11 @@
-import { requestJSON, streamJSONLines } from "./api.js";
-import {
-  DIFF_THEME,
-  REPO_SEARCH_DEBOUNCE_MS,
-  REPO_SEARCH_MIN_LIVE_LENGTH,
-} from "./constants.js";
+import { streamJSONLines } from "./api.js";
+import { SEARCH_DEBOUNCE_MS, SEARCH_MIN_LIVE_LENGTH } from "./constants.js";
 import { renderDiffs, setCurrentPath } from "./diff-view.js";
 import { createLucideIcon, setIconButton } from "./icons.js";
 import { isNarrowViewport, setSidebarTab, setTreeCollapsed } from "./layout.js";
+import { closePeek, openPeek, setupPeek } from "./peek.js";
 import { els, state } from "./state.js";
-import { afterNextPaint } from "./util.js";
+import { afterNextPaint, closestAcrossShadow, queryDeep } from "./util.js";
 
 const IDENTIFIER_PATTERN = /[\p{L}\p{N}_$]+/gu;
 const FLASH_BACKGROUND = "color-mix(in srgb, var(--accent-2) 30%, transparent)";
@@ -20,68 +17,58 @@ const MODIFIER_LABEL = IS_MAC ? "⌘" : "Ctrl";
 
 let debounceTimer;
 let renderTimer;
-let peekView;
 let underlinedToken;
 
-export function setupReferences() {
-  setIconButton(els.repoSearchCase, "CaseSensitive", "Match case");
-  setIconButton(els.repoSearchWord, "WholeWord", "Match whole word");
-  setIconButton(els.repoSearchRegex, "Regex", "Use regular expression");
-  setIconButton(els.peekClose, "X", "Close preview");
+export function setupSearch() {
+  setIconButton(els.searchCase, "CaseSensitive", "Match case");
+  setIconButton(els.searchWord, "WholeWord", "Match whole word");
+  setIconButton(els.searchRegex, "Regex", "Use regular expression");
   setIconButton(els.searchToggle, "Search", "Search repository");
-  els.searchToggle.addEventListener("click", () => openRepoSearch(selectedText()));
+  els.searchToggle.addEventListener("click", () => openSearch(selectedText()));
 
-  els.repoSearchForm.addEventListener("submit", (event) => {
+  els.searchForm.addEventListener("submit", (event) => {
     event.preventDefault();
-    runRepoSearch();
+    runSearch();
   });
-  els.repoSearchInput.addEventListener("input", scheduleLiveSearch);
-  els.repoSearchInput.addEventListener("keydown", (event) => {
+  els.searchInput.addEventListener("input", scheduleLiveSearch);
+  els.searchInput.addEventListener("keydown", (event) => {
     if (event.key !== "Escape") {
       return;
     }
     event.preventDefault();
     event.stopPropagation();
-    if (els.repoSearchInput.value) {
-      els.repoSearchInput.value = "";
+    if (els.searchInput.value) {
+      els.searchInput.value = "";
       clearResults();
     } else {
-      els.repoSearchInput.blur();
+      els.searchInput.blur();
     }
   });
   for (const [button, key] of [
-    [els.repoSearchCase, "caseSensitive"],
-    [els.repoSearchWord, "word"],
-    [els.repoSearchRegex, "regex"],
+    [els.searchCase, "caseSensitive"],
+    [els.searchWord, "word"],
+    [els.searchRegex, "regex"],
   ]) {
     button.addEventListener("click", () => {
-      state.refs[key] = !state.refs[key];
+      state.search[key] = !state.search[key];
       syncOptionButtons();
-      if (els.repoSearchInput.value.trim()) {
-        runRepoSearch();
+      if (els.searchInput.value.trim()) {
+        runSearch();
       }
     });
   }
-  els.peekClose.addEventListener("click", closePeek);
+  setupPeek(referenceTokenOptions());
   syncOptionButtons();
   renderResults();
 }
 
-export function handleReferencesKey(event) {
-  if (event.defaultPrevented) {
+export function handleSearchKey(event) {
+  if (event.defaultPrevented || !(event.metaKey || event.ctrlKey) || event.altKey || event.key.toLowerCase() !== "f") {
     return false;
   }
-  if ((event.metaKey || event.ctrlKey) && !event.altKey && event.key.toLowerCase() === "f") {
-    event.preventDefault();
-    openRepoSearch(selectedText());
-    return true;
-  }
-  if (event.key === "Escape" && !els.peek.hidden) {
-    event.preventDefault();
-    closePeek();
-    return true;
-  }
-  return false;
+  event.preventDefault();
+  openSearch(selectedText());
+  return true;
 }
 
 // Token hooks shared by the diff and the peek view: modifier-click a symbol
@@ -112,22 +99,22 @@ export function referenceTokenOptions() {
 }
 
 function findReferences(identifier) {
-  Object.assign(state.refs, { word: true, caseSensitive: true, regex: false });
-  els.repoSearchInput.value = identifier;
+  Object.assign(state.search, { word: true, caseSensitive: true, regex: false });
+  els.searchInput.value = identifier;
   syncOptionButtons();
   showSearchTab();
-  runRepoSearch();
+  runSearch();
 }
 
-function openRepoSearch(prefill) {
+function openSearch(prefill) {
   if (prefill) {
-    els.repoSearchInput.value = prefill;
+    els.searchInput.value = prefill;
   }
   showSearchTab();
-  els.repoSearchInput.focus();
-  els.repoSearchInput.select();
+  els.searchInput.focus();
+  els.searchInput.select();
   if (prefill) {
-    runRepoSearch();
+    runSearch();
   }
 }
 
@@ -184,28 +171,28 @@ function underlineToken(element) {
 
 function scheduleLiveSearch() {
   clearTimeout(debounceTimer);
-  const query = els.repoSearchInput.value.trim();
+  const query = els.searchInput.value.trim();
   if (!query) {
     clearResults();
     return;
   }
-  if (query.length < REPO_SEARCH_MIN_LIVE_LENGTH) {
+  if (query.length < SEARCH_MIN_LIVE_LENGTH) {
     return;
   }
-  debounceTimer = setTimeout(runRepoSearch, REPO_SEARCH_DEBOUNCE_MS);
+  debounceTimer = setTimeout(runSearch, SEARCH_DEBOUNCE_MS);
 }
 
-async function runRepoSearch() {
+async function runSearch() {
   clearTimeout(debounceTimer);
-  const query = els.repoSearchInput.value;
+  const query = els.searchInput.value;
   if (!query.trim()) {
     clearResults();
     return;
   }
-  stopRepoSearch();
+  stopSearch();
   const controller = new AbortController();
-  state.refs.controller = controller;
-  Object.assign(state.refs, {
+  state.search.controller = controller;
+  Object.assign(state.search, {
     error: "",
     activeKey: "",
     collapsedFiles: new Set(),
@@ -215,9 +202,9 @@ async function runRepoSearch() {
 
   const params = new URLSearchParams({
     q: query,
-    word: String(state.refs.word),
-    regex: String(state.refs.regex),
-    case_sensitive: String(state.refs.caseSensitive),
+    word: String(state.search.word),
+    regex: String(state.search.regex),
+    case_sensitive: String(state.search.caseSensitive),
   });
   try {
     await streamJSONLines(`/api/search?${params}`, {
@@ -232,17 +219,17 @@ async function runRepoSearch() {
     if (controller.signal.aborted) {
       return;
     }
-    state.refs.response = null;
-    state.refs.error = error instanceof Error ? error.message : String(error);
+    state.search.response = null;
+    state.search.error = error instanceof Error ? error.message : String(error);
   }
-  if (state.refs.controller === controller) {
-    state.refs.controller = null;
+  if (state.search.controller === controller) {
+    state.search.controller = null;
     renderResults();
   }
 }
 
 function applySearchEvent(event) {
-  const response = state.refs.response;
+  const response = state.search.response;
   switch (event.type) {
     case "file":
       insertSorted(response.files, event);
@@ -302,71 +289,71 @@ function scheduleRender() {
   }, STREAM_RENDER_MS);
 }
 
-function stopRepoSearch() {
-  if (state.refs.controller && state.refs.response) {
-    state.refs.response.stopped = true;
+function stopSearch() {
+  if (state.search.controller && state.search.response) {
+    state.search.response.stopped = true;
   }
-  state.refs.controller?.abort();
-  state.refs.controller = null;
+  state.search.controller?.abort();
+  state.search.controller = null;
 }
 
 function clearResults() {
   clearTimeout(debounceTimer);
-  stopRepoSearch();
-  state.refs.error = "";
-  state.refs.response = null;
+  stopSearch();
+  state.search.error = "";
+  state.search.response = null;
   renderResults();
 }
 
 function syncOptionButtons() {
-  els.repoSearchCase.setAttribute("aria-pressed", String(state.refs.caseSensitive));
-  els.repoSearchWord.setAttribute("aria-pressed", String(state.refs.word));
-  els.repoSearchRegex.setAttribute("aria-pressed", String(state.refs.regex));
+  els.searchCase.setAttribute("aria-pressed", String(state.search.caseSensitive));
+  els.searchWord.setAttribute("aria-pressed", String(state.search.word));
+  els.searchRegex.setAttribute("aria-pressed", String(state.search.regex));
 }
 
 function renderResults() {
   renderStatus();
-  const response = state.refs.response;
-  els.repoSearchResults.replaceChildren();
+  const response = state.search.response;
+  els.searchResults.replaceChildren();
   if (!response) {
-    if (!state.refs.error) {
-      els.repoSearchResults.append(emptyHint());
+    if (!state.search.error) {
+      els.searchResults.append(emptyHint());
     }
     return;
   }
   for (const file of response.files) {
-    els.repoSearchResults.append(createFileGroup(file));
+    els.searchResults.append(createFileGroup(file));
   }
 }
 
 function renderStatus() {
-  const { controller, error, response } = state.refs;
+  const { controller, error, response } = state.search;
   const loading = Boolean(controller);
-  els.repoSearchStatus.dataset.error = String(Boolean(error));
-  els.refsCount.textContent = response ? countLabel(response) : "0";
+  els.searchStatus.dataset.error = String(Boolean(error));
+  els.searchCount.textContent = response ? countLabel(response) : "0";
   if (error) {
-    els.repoSearchStatus.replaceChildren(error);
+    els.searchStatus.replaceChildren(error);
   } else if (response) {
     const text = document.createElement("span");
-    text.className = "repo-search-status-text";
+    text.className = "search-status-text";
     text.textContent = statusLabel(response, loading);
     text.title = text.textContent;
-    els.repoSearchStatus.replaceChildren(text);
+    els.searchStatus.replaceChildren(text);
     if (loading) {
-      els.repoSearchStatus.append(stopButton());
+      els.searchStatus.append(stopButton());
     }
   } else {
-    els.repoSearchStatus.replaceChildren();
+    els.searchStatus.replaceChildren();
   }
 }
 
 function stopButton() {
   const button = document.createElement("button");
   button.type = "button";
-  button.className = "repo-search-stop";
+  button.className = "search-stop";
   button.textContent = "Stop";
   button.addEventListener("click", () => {
-    stopRepoSearch();
+    stopSearch();
     renderResults();
   });
   return button;
@@ -393,33 +380,33 @@ function statusLabel(response, loading) {
 
 function emptyHint() {
   const hint = document.createElement("p");
-  hint.className = "repo-search-empty";
+  hint.className = "search-empty";
   hint.textContent = `${MODIFIER_LABEL}-click a symbol in the diff to find its references. ${MODIFIER_LABEL}F searches with the current selection.`;
   return hint;
 }
 
 function createFileGroup(file) {
   const group = document.createElement("section");
-  group.className = "repo-search-file";
-  const collapsed = state.refs.collapsedFiles.has(file.path);
+  group.className = "search-file";
+  const collapsed = state.search.collapsedFiles.has(file.path);
 
   const header = document.createElement("button");
   header.type = "button";
-  header.className = "repo-search-file-header";
+  header.className = "search-file-header";
   header.setAttribute("aria-expanded", String(!collapsed));
   header.title = file.path;
   header.addEventListener("click", () => {
-    if (state.refs.collapsedFiles.has(file.path)) {
-      state.refs.collapsedFiles.delete(file.path);
+    if (state.search.collapsedFiles.has(file.path)) {
+      state.search.collapsedFiles.delete(file.path);
     } else {
-      state.refs.collapsedFiles.add(file.path);
+      state.search.collapsedFiles.add(file.path);
     }
     renderResults();
   });
 
   const chevron = createLucideIcon(collapsed ? "ChevronRight" : "ChevronDown");
   const name = document.createElement("span");
-  name.className = "repo-search-path";
+  name.className = "search-path";
   const slash = file.path.lastIndexOf("/");
   const base = document.createElement("strong");
   base.textContent = file.path.slice(slash + 1);
@@ -438,7 +425,7 @@ function createFileGroup(file) {
 
   if (!collapsed) {
     const lines = document.createElement("div");
-    lines.className = "repo-search-lines";
+    lines.className = "search-lines";
     for (const match of file.matches) {
       lines.append(createMatchRow(file, match));
     }
@@ -451,12 +438,12 @@ function createMatchRow(file, match) {
   const key = `${file.path}:${match.line}`;
   const row = document.createElement("button");
   row.type = "button";
-  row.className = "repo-search-line";
-  row.dataset.active = String(key === state.refs.activeKey);
+  row.className = "search-line";
+  row.dataset.active = String(key === state.search.activeKey);
   row.title = `${file.path}:${match.line}`;
   row.addEventListener("click", () => {
-    state.refs.activeKey = key;
-    for (const other of els.repoSearchResults.querySelectorAll(".repo-search-line[data-active=\"true\"]")) {
+    state.search.activeKey = key;
+    for (const other of els.searchResults.querySelectorAll(".search-line[data-active=\"true\"]")) {
       other.dataset.active = "false";
     }
     row.dataset.active = "true";
@@ -464,7 +451,7 @@ function createMatchRow(file, match) {
   });
 
   const number = document.createElement("span");
-  number.className = "repo-search-line-number";
+  number.className = "search-line-number";
   number.textContent = String(match.line);
   row.append(number, matchText(match));
   if (match.definition) {
@@ -475,7 +462,7 @@ function createMatchRow(file, match) {
 
 function matchText(match) {
   const code = document.createElement("code");
-  code.className = "repo-search-text";
+  code.className = "search-text";
   const leading = match.clipped_start ? 0 : match.text.length - match.text.trimStart().length;
   if (match.clipped_start) {
     code.append("…");
@@ -501,7 +488,7 @@ function matchText(match) {
 
 function badge(text, title) {
   const node = document.createElement("span");
-  node.className = `repo-search-badge repo-search-badge-${text}`;
+  node.className = `search-badge search-badge-${text}`;
   node.textContent = text;
   node.title = title;
   return node;
@@ -578,34 +565,6 @@ function selectedText() {
   return "";
 }
 
-function queryDeep(root, selector, matches = []) {
-  if (root instanceof Element) {
-    if (root.matches(selector)) {
-      matches.push(root);
-    }
-    if (root.shadowRoot) {
-      queryDeep(root.shadowRoot, selector, matches);
-    }
-  }
-  for (const child of root.children || []) {
-    queryDeep(child, selector, matches);
-  }
-  return matches;
-}
-
-function closestAcrossShadow(element, selector) {
-  let node = element;
-  while (node) {
-    const match = node.closest(selector);
-    if (match) {
-      return match;
-    }
-    const root = node.getRootNode();
-    node = root instanceof ShadowRoot ? root.host : undefined;
-  }
-  return undefined;
-}
-
 function flashLines(elements) {
   for (const element of elements) {
     element.animate(
@@ -615,81 +574,3 @@ function flashLines(elements) {
   }
 }
 
-async function openPeek(path, lineNumber, inDiff) {
-  const title = `${path}:${lineNumber}`;
-  els.peek.hidden = false;
-  els.peekTitle.textContent = title;
-  els.peekSource.textContent = inDiff ? "reviewed revision" : "working copy";
-  showPeekMessage(loadingNode());
-  let file;
-  try {
-    file = await requestJSON(`/api/file?${new URLSearchParams({ path })}`);
-  } catch (error) {
-    if (els.peekTitle.textContent === title) {
-      showPeekMessage(errorNode(error));
-    }
-    return;
-  }
-  if (els.peekTitle.textContent !== title) {
-    return;
-  }
-  showPeekMessage(undefined);
-  const view = ensurePeekView();
-  view.setItems([{
-    id: file.path,
-    type: "file",
-    file: { name: file.path, contents: file.contents, cacheKey: `peek-${file.path}` },
-  }]);
-  view.render(true);
-  await afterNextPaint();
-  view.scrollTo({ type: "line", id: file.path, lineNumber, align: "center", behavior: "instant" });
-  view.setSelectedLines({ id: file.path, range: { start: lineNumber, end: lineNumber } }, { notify: false });
-}
-
-function showPeekMessage(node) {
-  els.peekMessage.hidden = !node;
-  els.peekMessage.replaceChildren(...(node ? [node] : []));
-}
-
-function ensurePeekView() {
-  if (!peekView) {
-    peekView = new state.CodeView({
-      theme: DIFF_THEME,
-      overflow: "scroll",
-      disableFileHeader: true,
-      enableLineSelection: true,
-      lineHoverHighlight: "both",
-      layout: { paddingTop: 0, paddingBottom: 0, gap: 0 },
-      ...referenceTokenOptions(),
-    }, state.workerManager);
-    peekView.setup(els.peekView);
-  }
-  return peekView;
-}
-
-function closePeek() {
-  if (els.peek.hidden) {
-    return;
-  }
-  els.peek.hidden = true;
-  els.peekTitle.textContent = "";
-  peekView?.setItems([]);
-  peekView?.render(true);
-}
-
-function loadingNode() {
-  const node = document.createElement("div");
-  node.className = "diff-loading";
-  const spinner = document.createElement("span");
-  spinner.className = "diff-loading-spinner";
-  spinner.setAttribute("aria-hidden", "true");
-  node.append(spinner, "Loading file");
-  return node;
-}
-
-function errorNode(error) {
-  const node = document.createElement("div");
-  node.className = "error";
-  node.textContent = error instanceof Error ? error.message : String(error);
-  return node;
-}

@@ -581,7 +581,7 @@ textarea {
   white-space: nowrap;
 }
 
-.repo-search {
+.search-panel {
   display: flex;
   flex: 1;
   flex-direction: column;
@@ -589,7 +589,7 @@ textarea {
   font-size: var(--font-size-xs);
 }
 
-.repo-search-form {
+.search-form {
   display: grid;
   grid-template-columns: minmax(0, 1fr) repeat(3, var(--icon-button-size));
   align-items: center;
@@ -597,7 +597,7 @@ textarea {
   padding: var(--space-2) var(--space-2) var(--space-1);
 }
 
-.repo-search-form input {
+.search-form input {
   width: 100%;
   min-width: 0;
   height: var(--icon-button-size);
@@ -605,39 +605,39 @@ textarea {
   font-size: var(--font-size-sm);
 }
 
-.repo-search-form .icon-button .icon {
+.search-form .icon-button .icon {
   width: 1.125rem;
   height: 1.125rem;
 }
 
-.repo-search-form .icon-button[aria-pressed="true"] {
+.search-form .icon-button[aria-pressed="true"] {
   border-color: color-mix(in srgb, var(--accent-2) 55%, transparent);
   background: color-mix(in srgb, var(--accent-2) 18%, transparent);
   color: var(--text);
 }
 
-.repo-search-status {
+.search-status {
   min-height: 1.25rem;
   padding: 0 var(--space-2-5) var(--space-1);
   color: var(--muted);
   font-variant-numeric: tabular-nums;
 }
 
-.repo-search-status:has(.repo-search-status-text) {
+.search-status:has(.search-status-text) {
   display: flex;
   align-items: center;
   gap: var(--space-1);
   white-space: nowrap;
 }
 
-.repo-search-status-text {
+.search-status-text {
   flex: 1;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-.repo-search-stop {
+.search-stop {
   flex: none;
   min-height: 0;
   padding: 0 var(--space-1);
@@ -647,15 +647,15 @@ textarea {
   font-size: var(--font-size-xs);
 }
 
-.repo-search-stop:hover {
+.search-stop:hover {
   text-decoration: underline;
 }
 
-.repo-search-status[data-error="true"] {
+.search-status[data-error="true"] {
   color: var(--danger);
 }
 
-.repo-search-results {
+.search-results {
   flex: 1;
   min-height: 0;
   padding: 0 var(--space-1) var(--space-2);
@@ -663,15 +663,15 @@ textarea {
   overscroll-behavior: contain;
 }
 
-.repo-search-empty {
+.search-empty {
   margin: 0;
   padding: var(--space-2);
   color: var(--muted);
   line-height: 1.5;
 }
 
-.repo-search-file-header,
-.repo-search-line {
+.search-file-header,
+.search-line {
   display: flex;
   align-items: center;
   gap: var(--space-1-5);
@@ -683,24 +683,24 @@ textarea {
   text-align: left;
 }
 
-.repo-search-file-header {
+.search-file-header {
   min-height: 1.75rem;
   padding: 0 var(--space-1-5);
 }
 
-.repo-search-file-header:hover,
-.repo-search-line:hover {
+.search-file-header:hover,
+.search-line:hover {
   background: var(--sidebar-pane-hover);
 }
 
-.repo-search-file-header .icon {
+.search-file-header .icon {
   flex: none;
   width: var(--icon-size-sm);
   height: var(--icon-size-sm);
   color: var(--muted);
 }
 
-.repo-search-path {
+.search-path {
   display: flex;
   flex: 1;
   align-items: baseline;
@@ -710,34 +710,34 @@ textarea {
   white-space: nowrap;
 }
 
-.repo-search-path strong {
+.search-path strong {
   flex: none;
   color: var(--text);
 }
 
-.repo-search-path span {
+.search-path span {
   min-width: 0;
   overflow: hidden;
   color: var(--muted);
   text-overflow: ellipsis;
 }
 
-.repo-search-lines {
+.search-lines {
   display: grid;
   padding-bottom: var(--space-1);
 }
 
-.repo-search-line {
+.search-line {
   min-height: 1.5rem;
   padding: 0 var(--space-1-5) 0 var(--space-4);
 }
 
-.repo-search-line[data-active="true"] {
+.search-line[data-active="true"] {
   border-color: color-mix(in srgb, var(--accent) 44%, var(--border));
   background: var(--sidebar-pane-active);
 }
 
-.repo-search-line-number {
+.search-line-number {
   flex: none;
   min-width: 2.5rem;
   color: var(--muted);
@@ -745,7 +745,7 @@ textarea {
   text-align: right;
 }
 
-.repo-search-text {
+.search-text {
   flex: 1;
   min-width: 0;
   overflow: hidden;
@@ -755,13 +755,13 @@ textarea {
   white-space: pre;
 }
 
-.repo-search-text mark {
+.search-text mark {
   border-radius: 0.125rem;
   background: color-mix(in srgb, var(--accent-2) 32%, transparent);
   color: inherit;
 }
 
-.repo-search-badge {
+.search-badge {
   flex: none;
   padding: 0 var(--space-1);
   border-radius: var(--radius-pill);
@@ -770,12 +770,12 @@ textarea {
   line-height: 1.4;
 }
 
-.repo-search-badge-diff {
+.search-badge-diff {
   background: color-mix(in srgb, var(--accent) 18%, transparent);
   color: var(--accent);
 }
 
-.repo-search-badge-def {
+.search-badge-def {
   background: color-mix(in srgb, var(--accent-2) 18%, transparent);
   color: var(--accent-2);
 }

@@ -240,7 +240,7 @@ export function syncCommentSummary() {
   renderCommentNavigator();
 }
 
-export async function saveComments() {
+async function saveComments() {
   await requestJSON("/api/comments", {
     method: "PUT",
     body: JSON.stringify({ comments: state.comments }),
