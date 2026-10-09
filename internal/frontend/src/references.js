@@ -347,7 +347,11 @@ function renderStatus() {
   if (error) {
     els.repoSearchStatus.replaceChildren(error);
   } else if (response) {
-    els.repoSearchStatus.replaceChildren(statusLabel(response, loading));
+    const text = document.createElement("span");
+    text.className = "repo-search-status-text";
+    text.textContent = statusLabel(response, loading);
+    text.title = text.textContent;
+    els.repoSearchStatus.replaceChildren(text);
     if (loading) {
       els.repoSearchStatus.append(stopButton());
     }
@@ -379,7 +383,7 @@ function statusLabel(response, loading) {
   const searched = `${response.searched_files.toLocaleString()} searched`;
   if (loading) {
     const scope = response.scope.length === 0 ? "diff" : response.scope.map((dir) => dir || "repository").join(", ");
-    return `${found} · ${searched} · in ${scope}… `;
+    return `${found} · ${searched} · in ${scope}…`;
   }
   const ending = response.stopped
     ? " · stopped"
@@ -508,18 +512,23 @@ function openMatch(file, match) {
     setTreeCollapsed(true);
   }
   const reviewFile = file.in_diff ? state.filesByPath.get(file.path) : undefined;
-  if (reviewFile) {
+  if (reviewFile && isHunkLine(reviewFile, match.line)) {
     closePeek();
-    revealInDiff(reviewFile.reviewId, match.line);
+    scrollDiffToLine(reviewFile.reviewId, match.line);
   } else {
-    openPeek(file.path, match.line);
+    openPeek(file.path, match.line, file.in_diff);
   }
 }
 
-// Search results come from the new side of the review, so they map onto
-// addition line numbers. revealLine only sees hunks of a mounted file, so the
-// file is scrolled into view before collapsed context is expanded.
-async function revealInDiff(reviewId, lineNumber) {
+// Results map onto addition line numbers. Lines outside hunks go to the peek
+// so jumping around never expands context in the diff.
+function isHunkLine(file, lineNumber) {
+  return (file.hunks || []).some((hunk) => (
+    lineNumber >= hunk.additionStart && lineNumber < hunk.additionStart + hunk.additionCount
+  ));
+}
+
+async function scrollDiffToLine(reviewId, lineNumber) {
   if (!state.codeView) {
     return;
   }
@@ -528,11 +537,6 @@ async function revealInDiff(reviewId, lineNumber) {
     renderDiffs();
   }
   setCurrentPath(reviewId, { scrollDiff: false, selectTree: true });
-  state.codeView.scrollTo({ type: "item", id: reviewId, align: "start", behavior: "instant" });
-  await afterNextPaint();
-  if (state.codeView.idToItem?.get(reviewId)?.instance?.revealLine?.(lineNumber)) {
-    await afterNextPaint();
-  }
   state.codeView.scrollTo({
     type: "line",
     id: reviewId,
@@ -611,10 +615,11 @@ function flashLines(elements) {
   }
 }
 
-async function openPeek(path, lineNumber) {
+async function openPeek(path, lineNumber, inDiff) {
   const title = `${path}:${lineNumber}`;
   els.peek.hidden = false;
   els.peekTitle.textContent = title;
+  els.peekSource.textContent = inDiff ? "reviewed revision" : "working copy";
   showPeekMessage(loadingNode());
   let file;
   try {

@@ -61,6 +61,7 @@ export const els = {
   repoSearchResults: document.querySelector("#repo-search-results"),
   peek: document.querySelector("#peek"),
   peekTitle: document.querySelector("#peek-title"),
+  peekSource: document.querySelector("#peek-source"),
   peekClose: document.querySelector("#peek-close"),
   peekMessage: document.querySelector("#peek-message"),
   peekView: document.querySelector("#peek-view"),
