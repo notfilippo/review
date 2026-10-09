@@ -1,20 +1,16 @@
 import { els, state } from "./state.js";
 
-export function computeDiffStats(patch, fileCount) {
+export function computeDiffStats(files) {
   let additions = 0;
   let deletions = 0;
-  for (const line of patch.split("\n")) {
-    if (line.startsWith("+++") || line.startsWith("---")) {
-      continue;
-    }
-    if (line.startsWith("+")) {
-      additions += 1;
-    } else if (line.startsWith("-")) {
-      deletions += 1;
+  for (const file of files) {
+    for (const hunk of file.hunks || []) {
+      additions += hunk.additionLines;
+      deletions += hunk.deletionLines;
     }
   }
   return {
-    files: fileCount,
+    files: files.length,
     additions,
     deletions,
     lines: additions + deletions,

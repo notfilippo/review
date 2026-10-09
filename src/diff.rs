@@ -1,4 +1,3 @@
-use anyhow::Result;
 use bstr::ByteSlice;
 use jj_lib::diff_presentation::LineCompareMode;
 use jj_lib::diff_presentation::unified::{DiffLineType, unified_diff_hunks};
@@ -19,15 +18,9 @@ pub struct FileDiffInput {
     pub new: Option<FileSnapshot>,
 }
 
-pub fn render_patch(files: &[FileDiffInput]) -> Result<String> {
-    let mut patch = String::new();
-    for file in files {
-        render_file_patch(&mut patch, file)?;
-    }
-    Ok(patch)
-}
-
-fn render_file_patch(out: &mut String, file: &FileDiffInput) -> Result<()> {
+/// Renders one file as a Git-style patch, the input Pierre's diff renderer parses.
+pub fn render_file_patch(file: &FileDiffInput) -> String {
+    let mut out = String::new();
     let display_old = if file.old_path.is_empty() {
         &file.new_path
     } else {
@@ -45,7 +38,7 @@ fn render_file_patch(out: &mut String, file: &FileDiffInput) -> Result<()> {
     out.push('\n');
 
     match (&file.old, &file.new) {
-        (None, None) => return Ok(()),
+        (None, None) => return out,
         (None, Some(new)) => {
             out.push_str("new file mode ");
             out.push_str(&new.mode);
@@ -101,7 +94,7 @@ fn render_file_patch(out: &mut String, file: &FileDiffInput) -> Result<()> {
         out.push_str(" and ");
         out.push_str(&null_or_prefixed("b/", display_new, file.new.is_some()));
         out.push_str(" differ\n");
-        return Ok(());
+        return out;
     }
 
     out.push_str("--- ");
@@ -137,7 +130,7 @@ fn render_file_patch(out: &mut String, file: &FileDiffInput) -> Result<()> {
             }
         }
     }
-    Ok(())
+    out
 }
 
 fn hunk_range(start: usize, end: usize) -> String {
@@ -185,6 +178,9 @@ fn quote_git_path(path: &str) -> String {
     quoted
 }
 
-fn is_binary(contents: &[u8]) -> bool {
-    contents.iter().take(8000).any(|byte| *byte == 0)
+const BINARY_SNIFF_BYTES: usize = 8000;
+
+/// Git's heuristic: a NUL byte near the start means binary.
+pub fn is_binary(contents: &[u8]) -> bool {
+    contents[..contents.len().min(BINARY_SNIFF_BYTES)].contains(&0)
 }

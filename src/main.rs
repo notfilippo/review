@@ -4,7 +4,6 @@ mod frontend;
 mod git_backend;
 mod jj_backend;
 mod markdown;
-mod patch;
 mod search;
 mod server;
 mod vcs;

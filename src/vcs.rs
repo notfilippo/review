@@ -5,26 +5,33 @@ use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 
 use crate::cli::CliOptions;
-use crate::diff::{FileDiffInput, FileSnapshot};
-use crate::patch::{PatchFile, parse_patch};
+use crate::diff::{FileDiffInput, FileSnapshot, render_file_patch};
 use crate::{git_backend, jj_backend};
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Debug)]
 pub struct ReviewInput {
-    pub patch: String,
-    pub files: Vec<PatchFile>,
-    pub file_contexts: Vec<FileContext>,
+    pub files: Vec<ReviewFile>,
 }
 
-#[derive(Clone, Debug, Serialize)]
-pub struct FileContext {
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+pub enum FileStatus {
+    Added,
+    Deleted,
+    Modified,
+}
+
+/// One changed file: its patch plus both full versions, so the UI can expand
+/// context without asking the server again.
+#[derive(Debug, Serialize)]
+pub struct ReviewFile {
     pub path: String,
+    pub status: FileStatus,
     pub patch: String,
     pub old_file: FileContents,
     pub new_file: FileContents,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Debug, Serialize)]
 pub struct FileContents {
     pub name: String,
     pub contents: String,
@@ -122,53 +129,34 @@ pub async fn load_review_input(options: &CliOptions) -> Result<(PathBuf, ReviewI
         VcsKind::Git => git_backend::load_review_input(options, &location.root, &paths)?,
     };
 
-    if input.patch.trim().is_empty() {
+    if input.files.is_empty() {
         bail!("VCS diff is empty");
     }
     Ok((location.root, input))
 }
 
-pub fn build_review_input(patch: String, file_inputs: Vec<FileDiffInput>) -> ReviewInput {
-    let (files, file_patches) = parse_patch(&patch);
-    let file_contexts = files
+pub fn build_review_input(inputs: Vec<FileDiffInput>) -> ReviewInput {
+    let files = inputs
         .iter()
-        .map(|file| {
-            let raw_patch = file_patches
-                .get(file.display_path())
-                .or_else(|| {
-                    file.prev_path
-                        .as_ref()
-                        .and_then(|prev_path| file_patches.get(prev_path))
-                })
-                .cloned()
-                .unwrap_or_default();
-            let (old_path, new_path) = file.context_paths();
-            let input = file_inputs.iter().find(|input| {
-                input.old_path == old_path
-                    || input.new_path == new_path
-                    || input.old_path == file.display_path()
-                    || input.new_path == file.display_path()
-            });
-            FileContext {
-                path: file.display_path().to_string(),
-                patch: raw_patch,
-                old_file: FileContents {
-                    name: old_path.to_string(),
-                    contents: snapshot_contents(input.and_then(|input| input.old.as_ref())),
-                },
-                new_file: FileContents {
-                    name: new_path.to_string(),
-                    contents: snapshot_contents(input.and_then(|input| input.new.as_ref())),
-                },
-            }
+        .map(|input| ReviewFile {
+            path: input.new_path.clone(),
+            status: match (&input.old, &input.new) {
+                (None, _) => FileStatus::Added,
+                (_, None) => FileStatus::Deleted,
+                _ => FileStatus::Modified,
+            },
+            patch: render_file_patch(input),
+            old_file: FileContents {
+                name: input.old_path.clone(),
+                contents: snapshot_contents(input.old.as_ref()),
+            },
+            new_file: FileContents {
+                name: input.new_path.clone(),
+                contents: snapshot_contents(input.new.as_ref()),
+            },
         })
         .collect();
-
-    ReviewInput {
-        patch,
-        files,
-        file_contexts,
-    }
+    ReviewInput { files }
 }
 
 fn detect_repo(cwd: &Path) -> Result<RepoLocation> {
@@ -302,7 +290,25 @@ mod tests {
     use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};
 
-    use super::normalize_path_filters;
+    use super::{FileStatus, build_review_input, normalize_path_filters};
+    use crate::diff::{FileDiffInput, FileSnapshot};
+
+    fn snapshot(contents: &[u8]) -> Option<FileSnapshot> {
+        Some(FileSnapshot {
+            mode: "100644".to_string(),
+            hash: "0123456789abcdef".to_string(),
+            contents: contents.to_vec(),
+        })
+    }
+
+    fn input(path: &str, old: Option<FileSnapshot>, new: Option<FileSnapshot>) -> FileDiffInput {
+        FileDiffInput {
+            old_path: path.to_string(),
+            new_path: path.to_string(),
+            old,
+            new,
+        }
+    }
 
     fn temp_dir(name: &str) -> PathBuf {
         let unique = SystemTime::now()
@@ -341,5 +347,44 @@ mod tests {
 
         assert_eq!(filters, ["link", "root-link"]);
         fs::remove_dir_all(container).expect("remove symlink test directory");
+    }
+
+    #[test]
+    fn review_files_carry_status_patch_and_contents() {
+        let review = build_review_input(vec![
+            input("added.txt", None, snapshot(b"new\n")),
+            input("gone.txt", snapshot(b"old\n"), None),
+            input("caf\u{e9}.txt", snapshot(b"a\nb\n"), snapshot(b"a\nc\n")),
+            input("blob.bin", snapshot(b"\0old"), snapshot(b"\0new")),
+        ]);
+
+        let statuses = review
+            .files
+            .iter()
+            .map(|file| file.status)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            statuses,
+            [
+                FileStatus::Added,
+                FileStatus::Deleted,
+                FileStatus::Modified,
+                FileStatus::Modified
+            ]
+        );
+        assert!(review.files[0].patch.contains("new file mode 100644\n"));
+        assert!(review.files[0].patch.ends_with("@@ -0,0 +1 @@\n+new\n"));
+        assert_eq!(review.files[1].new_file.contents, "");
+        assert!(
+            review.files[2]
+                .patch
+                .starts_with("diff --git \"a/caf\\303\\251.txt\" \"b/caf\\303\\251.txt\"\n")
+        );
+        assert!(review.files[2].patch.contains("-b\n+c\n"));
+        assert!(
+            review.files[3]
+                .patch
+                .contains("Binary files a/blob.bin and b/blob.bin differ\n")
+        );
     }
 }

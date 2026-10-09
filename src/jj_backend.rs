@@ -19,7 +19,7 @@ use jj_lib::settings::UserSettings;
 use jj_lib::workspace::{Workspace, default_working_copy_factories};
 
 use crate::cli::CliOptions;
-use crate::diff::{FileDiffInput, FileSnapshot, render_patch};
+use crate::diff::{FileDiffInput, FileSnapshot};
 use crate::vcs::{ReviewInput, build_review_input};
 
 const DEFAULT_REVIEW_REVSET: &str = "trunk()..@";
@@ -150,8 +150,7 @@ async fn change_between(
     paths: &[String],
 ) -> Result<ReviewInput> {
     let files = diff_trees(from, to, paths).await?;
-    let patch = render_patch(&files)?;
-    Ok(build_review_input(patch, files))
+    Ok(build_review_input(files))
 }
 
 async fn diff_trees(

@@ -12,7 +12,7 @@ use gix::remote::Direction;
 use gix::status::UntrackedFiles;
 
 use crate::cli::CliOptions;
-use crate::diff::{FileDiffInput, FileSnapshot, render_patch};
+use crate::diff::{FileDiffInput, FileSnapshot};
 use crate::vcs::{ReviewInput, build_review_input};
 
 #[derive(Clone, Debug)]
@@ -90,8 +90,7 @@ fn worktree_review(
     };
     let new_entries = collect_worktree_entries(repo, root, head_entries, paths)?;
     let files = compare_entries(repo, &old_entries, &new_entries, paths)?;
-    let patch = render_patch(&files)?;
-    Ok(build_review_input(patch, files))
+    Ok(build_review_input(files))
 }
 
 fn default_worktree_review(
@@ -120,8 +119,7 @@ fn default_worktree_review(
     };
     let new_entries = collect_worktree_entries(repo, root, head_entries, paths)?;
     let files = compare_entries(repo, &old_entries, &new_entries, paths)?;
-    let patch = render_patch(&files)?;
-    Ok(build_review_input(patch, files))
+    Ok(build_review_input(files))
 }
 
 fn commit_review(repo: &gix::Repository, revision: &str, paths: &[String]) -> Result<ReviewInput> {
@@ -141,8 +139,7 @@ fn commit_review(repo: &gix::Repository, revision: &str, paths: &[String]) -> Re
     };
     let new_entries = collect_tree_entries(&commit.tree()?, paths)?;
     let files = compare_entries(repo, &old_entries, &new_entries, paths)?;
-    let patch = render_patch(&files)?;
-    Ok(build_review_input(patch, files))
+    Ok(build_review_input(files))
 }
 
 fn range_review(
@@ -156,8 +153,7 @@ fn range_review(
     let old_entries = collect_tree_entries(&from.tree()?, paths)?;
     let new_entries = collect_tree_entries(&to.tree()?, paths)?;
     let files = compare_entries(repo, &old_entries, &new_entries, paths)?;
-    let patch = render_patch(&files)?;
-    Ok(build_review_input(patch, files))
+    Ok(build_review_input(files))
 }
 
 fn collect_tree_entries(

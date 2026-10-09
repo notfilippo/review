@@ -13,6 +13,5 @@ export const DEFAULT_COMMENT_SIDE = "additions";
 export const TREE_STATUS_ADDED = "added";
 export const TREE_STATUS_DELETED = "deleted";
 export const TREE_STATUS_MODIFIED = "modified";
-export const TREE_STATUS_RENAMED = "renamed";
 export const NEXT_FILE_KEYS = new Set(["j", "]"]);
 export const PREVIOUS_FILE_KEYS = new Set(["k", "["]);

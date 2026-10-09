@@ -30,7 +30,7 @@ import {
   syncLayoutToggle,
   syncTreeToggle,
 } from "./layout.js";
-import { buildReviewFiles, fileCommentKey, orderFilesForTree } from "./patch-files.js";
+import { buildReviewFiles, orderFilesForTree } from "./patch-files.js";
 import { handlePeekKey } from "./peek.js";
 import { handleSearchKey, setupSearch } from "./search.js";
 import { computeDiffStats, renderDiffStats } from "./stats.js";
@@ -50,7 +50,7 @@ async function init() {
     }
     bindActions();
     const [
-      { CodeView, getFiletypeFromFileName, parsePatchFiles, processFile },
+      { CodeView, getFiletypeFromFileName, processFile },
       { FileTree, prepareFileTreeInput },
       { getOrCreateWorkerPoolSingleton, terminateWorkerPoolSingleton },
     ] = await Promise.all([
@@ -64,13 +64,10 @@ async function init() {
     state.comments = Array.isArray(session.comments) ? session.comments : [];
     renderDiffLoading("Processing diff");
     await afterNextPaint();
-    state.files = buildReviewFiles(session, parsePatchFiles, processFile);
+    state.files = buildReviewFiles(session, processFile);
     state.files = orderFilesForTree(state.files, prepareFileTreeInput);
     state.filesByPath = new Map(state.files.map((file) => [file.reviewId, file]));
-    state.filesByTreePath = new Map(state.files.map((file) => [file.treePath, file]));
-    state.fileKeyToReviewId = new Map(state.files.map((file) => [fileCommentKey(file.name), file.reviewId]));
-    state.patchText = session.patch || "";
-    state.diffStats = computeDiffStats(state.patchText, state.files.length);
+    state.diffStats = computeDiffStats(state.files);
 
     setupTree(FileTree);
     state.workerManager = createDiffWorkerManager(getOrCreateWorkerPoolSingleton, state.files, getFiletypeFromFileName);

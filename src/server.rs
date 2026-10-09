@@ -19,14 +19,12 @@ use tokio::sync::{Notify, mpsc};
 
 use crate::cli::CliOptions;
 use crate::frontend;
-use crate::patch::PatchFile;
 use crate::search::{SearchCorpus, SearchRequest};
-use crate::vcs::{FileContext, ReviewComment, ReviewInput, normalize_comments};
+use crate::vcs::{ReviewComment, ReviewFile, ReviewInput, normalize_comments};
 
 const TOKEN_BYTES: usize = 16;
 const SEARCH_EVENT_BUFFER: usize = 256;
 
-#[derive(Clone)]
 struct ReviewSession {
     token: String,
     input: ReviewInput,
@@ -37,10 +35,8 @@ struct ReviewSession {
 }
 
 #[derive(Serialize)]
-struct SessionResponse {
-    patch: String,
-    files: Vec<PatchFile>,
-    file_contexts: Vec<FileContext>,
+struct SessionResponse<'a> {
+    files: &'a [ReviewFile],
     comments: Vec<ReviewComment>,
 }
 
@@ -159,11 +155,8 @@ async fn handle_session(
     if !session.authorized(&headers, query.token.as_deref()) {
         return error(StatusCode::UNAUTHORIZED, "unauthorized");
     }
-    let input = session.input.clone();
     Json(SessionResponse {
-        patch: input.patch,
-        files: input.files,
-        file_contexts: input.file_contexts,
+        files: &session.input.files,
         comments: session.comments_snapshot(),
     })
     .into_response()

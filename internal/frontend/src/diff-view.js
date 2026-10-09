@@ -129,7 +129,7 @@ export function setCurrentPath(path, options = {}) {
     syncTreeSelection(path);
   }
   if (state.tree && file) {
-    state.tree.scrollToPath(file.treePath, { focus: false, offset: "nearest" });
+    state.tree.scrollToPath(file.reviewId, { focus: false, offset: "nearest" });
   }
   if (scrollDiff) {
     scrollToCurrentFile("smooth");

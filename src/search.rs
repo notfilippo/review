@@ -10,15 +10,14 @@ use ignore::{WalkBuilder, WalkState};
 use regex::bytes::{Regex, RegexBuilder};
 use serde::{Deserialize, Serialize};
 
-use crate::patch::FileStatus;
-use crate::vcs::ReviewInput;
+use crate::diff::is_binary;
+use crate::vcs::{FileStatus, ReviewInput};
 
 const MAX_MATCHES: usize = 2000;
 const PROGRESS_EVERY_FILES: usize = 5000;
 const MAX_FILE_BYTES: u64 = 4 * 1024 * 1024;
 const MAX_LINE_BYTES: usize = 400;
 const LINE_LEAD_BYTES: usize = 80;
-const BINARY_SNIFF_BYTES: usize = 8 * 1024;
 const SKIPPED_DIRS: [&str; 2] = [".git", ".jj"];
 
 // Keywords that introduce a named item across common languages. Matching is
@@ -128,20 +127,12 @@ impl SearchCorpus {
         let mut overlay = HashMap::new();
         let mut shadowed = HashSet::new();
         for file in &input.files {
-            let (old_path, new_path) = file.context_paths();
-            shadowed.insert(old_path.to_string());
-            shadowed.insert(new_path.to_string());
-            if matches!(file.status, FileStatus::Deleted) {
-                continue;
-            }
-            let context = input
-                .file_contexts
-                .iter()
-                .find(|context| context.path == file.display_path());
-            if let Some(context) = context {
+            shadowed.insert(file.old_file.name.clone());
+            shadowed.insert(file.new_file.name.clone());
+            if file.status != FileStatus::Deleted {
                 overlay.insert(
-                    new_path.to_string(),
-                    Arc::from(context.new_file.contents.as_bytes()),
+                    file.new_file.name.clone(),
+                    Arc::from(file.new_file.contents.as_bytes()),
                 );
             }
         }
@@ -565,10 +556,6 @@ fn finish_line(bytes: &[u8], line: Option<LineHits>, matchers: &Matchers) -> Opt
     })
 }
 
-fn is_binary(bytes: &[u8]) -> bool {
-    bytes[..bytes.len().min(BINARY_SNIFF_BYTES)].contains(&0)
-}
-
 fn relative_path(root: &Path, path: &Path) -> Option<String> {
     let relative = path.strip_prefix(root).ok()?;
     let mut parts = Vec::new();
@@ -611,8 +598,7 @@ mod tests {
         Matchers, SearchCorpus, SearchEvent, SearchRequest, normalize_request_path,
         proximity_scopes, search_buffer,
     };
-    use crate::patch::{FileStatus, PatchFile};
-    use crate::vcs::{FileContents, FileContext, ReviewInput};
+    use crate::vcs::{FileContents, FileStatus, ReviewFile, ReviewInput};
 
     fn request(q: &str, word: bool) -> SearchRequest {
         SearchRequest {
@@ -734,14 +720,9 @@ mod tests {
             fs::write(path, contents).expect("write test file");
         }
         let input = ReviewInput {
-            patch: String::new(),
-            files: vec![PatchFile {
+            files: vec![ReviewFile {
                 path: "a/b/new.rs".to_string(),
-                prev_path: None,
                 status: FileStatus::Added,
-            }],
-            file_contexts: vec![FileContext {
-                path: "a/b/new.rs".to_string(),
                 patch: String::new(),
                 old_file: FileContents {
                     name: "a/b/new.rs".to_string(),

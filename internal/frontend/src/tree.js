@@ -5,11 +5,11 @@ import { els, state } from "./state.js";
 
 export function setupTree(FileTree) {
   state.tree = new FileTree({
-    paths: state.files.map((file) => file.treePath),
+    paths: state.files.map((file) => file.reviewId),
     flattenEmptyDirectories: true,
     initialExpansion: "open",
     search: true,
-    gitStatus: state.files.map((file) => ({ path: file.treePath, status: gitStatus(file.type) })),
+    gitStatus: state.files.map((file) => ({ path: file.reviewId, status: gitStatus(file.status) })),
     onSelectionChange(selectedPaths) {
       if (state.syncingTree) {
         return;
@@ -18,7 +18,7 @@ export function setupTree(FileTree) {
       if (!path) {
         return;
       }
-      const file = state.filesByTreePath.get(path);
+      const file = state.filesByPath.get(path);
       if (!file) {
         return;
       }
@@ -34,27 +34,25 @@ export function setupTree(FileTree) {
 
 function selectedTreeFilePath(selectedPaths) {
   const focusedPath = state.tree.getFocusedPath?.() || "";
-  if (state.filesByTreePath.has(focusedPath) && selectedPaths.includes(focusedPath)) {
+  if (state.filesByPath.has(focusedPath) && selectedPaths.includes(focusedPath)) {
     return focusedPath;
   }
-  return [...selectedPaths].reverse().find((path) => state.filesByTreePath.has(path)) || "";
+  return [...selectedPaths].reverse().find((path) => state.filesByPath.has(path)) || "";
 }
 
 export function syncTreeSelection(path, selectedPaths = state.tree.getSelectedPaths?.() || []) {
-  const file = state.filesByPath.get(path);
-  const treePath = file?.treePath || path;
-  const item = state.tree && state.tree.getItem(treePath);
+  const item = state.tree && state.tree.getItem(path);
   if (!item) {
     return;
   }
-  if (item.isSelected() && selectedPaths.length === 1 && selectedPaths[0] === treePath) {
+  if (item.isSelected() && selectedPaths.length === 1 && selectedPaths[0] === path) {
     return;
   }
 
   state.syncingTree = true;
   try {
     for (const selectedPath of selectedPaths) {
-      if (selectedPath !== treePath) {
+      if (selectedPath !== path) {
         state.tree.getItem(selectedPath)?.deselect();
       }
     }

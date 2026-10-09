@@ -2,7 +2,6 @@ import { DEFAULT_COMMENT_SIDE } from "./constants.js";
 import { requestJSON } from "./api.js";
 import { renderDiffs, setCurrentPath } from "./diff-view.js";
 import { setIconButton } from "./icons.js";
-import { fileCommentKey } from "./patch-files.js";
 import { els, state } from "./state.js";
 import { isEditableTarget, stopDiffEvents } from "./util.js";
 
@@ -305,7 +304,7 @@ function sameFileComment(comment, file) {
 }
 
 function reviewIdForComment(comment) {
-  return state.fileKeyToReviewId.get(fileCommentKey(comment.path)) || "";
+  return state.filesByPath.has(comment.path) ? comment.path : "";
 }
 
 function rangeLabel(comment) {
