@@ -29,8 +29,8 @@
   --primary-hover: color-mix(in srgb, var(--accent) 88%, white);
   --backdrop: rgb(0 0 0 / 0.42);
   --shadow: 0 0.0625rem 0.125rem rgb(16 24 40 / 0.08);
-  --floating-shadow: 0 0.375rem 1rem rgb(16 24 40 / 0.16);
   --sheet-shadow: 0 -1.125rem 2.75rem rgb(0 0 0 / 0.35);
+  --font-mono: ui-monospace, "SFMono-Regular", Menlo, Monaco, Consolas, "Liberation Mono", monospace;
   --font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   --font-size-xs: 0.75rem;
   --font-size-sm: 0.8125rem;
@@ -42,7 +42,6 @@
   --space-2: 0.5rem;
   --space-2-5: 0.625rem;
   --space-3: 0.75rem;
-  --space-3-5: 0.875rem;
   --space-4: 1rem;
   --radius-sm: 0.375rem;
   --radius-md: 0.5rem;
@@ -63,7 +62,6 @@
   --sidebar-max: min(56rem, 70vw);
   --sidebar-resizer-hit: 0.75rem;
   --sidebar-resizer-line: 0.125rem;
-  --pane-header-min-height: 2.625rem;
   --chevron-box-size: 0.875rem;
   --chevron-mark-size: 0.375rem;
   --chevron-stroke: 0.09375rem;
@@ -88,15 +86,10 @@
     --accent: #009fff;
     --accent-2: #009fff;
     --danger: #ff6762;
-    --sidebar-panel-bg: var(--sidebar-bg);
-    --sidebar-pane-bg: transparent;
-    --sidebar-pane-header-bg: transparent;
     --sidebar-pane-hover: #292f35;
     --sidebar-pane-active: #112b36;
     --primary-hover: #0190e7;
     --shadow: none;
-    --sidebar-pane-shadow: none;
-    --floating-shadow: 0 0.625rem 1.5rem rgb(0 0 0 / 0.42);
   }
 }
 
@@ -216,10 +209,7 @@ textarea {
   resize: vertical;
 }
 
-input {
-  background: var(--input-bg);
-}
-
+input,
 textarea {
   background: var(--input-bg);
 }
@@ -349,7 +339,7 @@ textarea {
   background: var(--border);
   color: var(--muted);
   font-size: var(--font-size-xs);
-  font-family: ui-monospace, "SFMono-Regular", Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
   text-align: center;
 }
@@ -442,7 +432,7 @@ textarea {
   align-items: center;
   justify-content: space-between;
   gap: var(--space-2);
-  min-height: 2rem;
+  min-height: var(--control-size);
   padding: var(--space-1) var(--space-2);
   border-bottom: var(--border-width) solid transparent;
   background: var(--sidebar-pane-header-bg);
@@ -496,7 +486,7 @@ textarea {
   border-radius: var(--radius-pill);
   background: var(--hover);
   color: var(--muted);
-  font-family: ui-monospace, "SFMono-Regular", Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-family: var(--font-mono);
   font-weight: 400;
   font-variant-numeric: tabular-nums;
 }
@@ -750,7 +740,7 @@ textarea {
   min-width: 0;
   overflow: hidden;
   color: var(--text);
-  font-family: ui-monospace, "SFMono-Regular", Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-family: var(--font-mono);
   text-overflow: ellipsis;
   white-space: pre;
 }
@@ -817,7 +807,7 @@ textarea {
 .diff-stats-grid dd {
   margin: 0;
   color: var(--muted);
-  font-family: ui-monospace, "SFMono-Regular", Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
 }
 
@@ -868,7 +858,7 @@ textarea {
   flex: 1;
   min-width: 0;
   overflow: hidden;
-  font-family: ui-monospace, "SFMono-Regular", Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-family: var(--font-mono);
   font-size: var(--font-size-xs);
   font-weight: 600;
   text-overflow: ellipsis;
@@ -1007,6 +997,7 @@ textarea {
   color: var(--danger);
 }
 
+/* Keep in sync with NARROW_VIEWPORT_QUERY in constants.js. */
 @media (max-width: 56.25rem) {
   .workspace {
     position: relative;

@@ -205,7 +205,7 @@ function activeSelectionComment() {
   if (state.draft) {
     return state.draft;
   }
-  const id = state.editingId || state.hoveredCommentId || state.selectedCommentId;
+  const id = activeCommentId();
   return id ? state.comments.find((comment) => comment.id === id) : undefined;
 }
 
@@ -232,18 +232,26 @@ export function applyActiveSelection() {
 }
 
 export function syncCommentSummary() {
-  const count = state.comments.length;
-  if (els.commentSummary) {
-    els.commentSummary.textContent = `${count} comment${count === 1 ? "" : "s"}`;
-  }
   renderCommentNavigator();
 }
 
+// Comments only reach stdout through the server, so a failed save must be
+// visible instead of silently losing work.
 async function saveComments() {
-  await requestJSON("/api/comments", {
-    method: "PUT",
-    body: JSON.stringify({ comments: state.comments }),
-  });
+  try {
+    await requestJSON("/api/comments", {
+      method: "PUT",
+      body: JSON.stringify({ comments: state.comments }),
+    });
+  } catch (error) {
+    els.status.dataset.savedText ??= els.status.textContent;
+    els.status.textContent = `Could not save comments: ${error.message}`;
+    return;
+  }
+  if (els.status.dataset.savedText != null) {
+    els.status.textContent = els.status.dataset.savedText;
+    delete els.status.dataset.savedText;
+  }
   syncCommentSummary();
 }
 
@@ -316,10 +324,6 @@ function rangeLabel(comment) {
 }
 
 function renderCommentNavigator() {
-  if (!els.commentNavigator || !els.commentNavigatorSummary) {
-    return;
-  }
-
   const comments = orderedComments();
   const count = comments.length;
   els.commentNavigatorSummary.textContent = String(count);

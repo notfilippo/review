@@ -101,9 +101,6 @@ export function createDiffWorkerManager(getOrCreateWorkerPoolSingleton, files, g
 }
 
 function languagesForFiles(files, getFiletypeFromFileName) {
-  if (typeof getFiletypeFromFileName !== "function") {
-    return [];
-  }
   const languages = new Set();
   for (const file of files) {
     const language = getFiletypeFromFileName(file.name);
@@ -115,9 +112,6 @@ function languagesForFiles(files, getFiletypeFromFileName) {
 }
 
 export function bindWorkerCleanup(terminateWorkerPoolSingleton) {
-  if (typeof terminateWorkerPoolSingleton !== "function") {
-    return;
-  }
   window.addEventListener("pagehide", terminateWorkerPoolSingleton, { once: true });
 }
 

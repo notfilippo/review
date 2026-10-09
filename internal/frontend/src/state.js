@@ -66,7 +66,6 @@ export const els = {
   diff: document.querySelector("#diff"),
   diffStats: document.querySelector("#diff-stats"),
   diffStatsSummary: document.querySelector("#diff-stats-summary"),
-  commentSummary: document.querySelector("#comment-summary"),
   commentNavigator: document.querySelector("#comment-nav"),
   commentNavigatorSummary: document.querySelector("#comment-nav-summary"),
   searchToggle: document.querySelector("#search-toggle"),

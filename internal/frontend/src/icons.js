@@ -1,6 +1,4 @@
 import {
-  ArrowDown,
-  ArrowUp,
   CaseSensitive,
   Check,
   ChevronDown,
@@ -23,8 +21,6 @@ import {
 } from "lucide";
 
 const icons = {
-  ArrowDown,
-  ArrowUp,
   CaseSensitive,
   Check,
   ChevronDown,
