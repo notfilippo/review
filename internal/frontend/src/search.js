@@ -14,9 +14,11 @@ const STREAM_RENDER_MS = 120;
 const DIFF_SIDE_SELECTOR = "[data-additions], [data-deletions], [data-unified]";
 const IS_MAC = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
 const MODIFIER_LABEL = IS_MAC ? "⌘" : "Ctrl";
+const REFERENCE_HIGHLIGHT = "review-reference";
 
 let debounceTimer;
 let renderTimer;
+let hoveredToken;
 let underlinedToken;
 
 export function setupSearch() {
@@ -75,6 +77,7 @@ export function handleSearchKey(event) {
 // to list every place it appears in the repository.
 export function referenceTokenOptions() {
   return {
+    unsafeCSS: `::highlight(${REFERENCE_HIGHLIGHT}) { text-decoration: underline; }`,
     onTokenClick(token, event) {
       if (!isReferenceClick(event)) {
         return;
@@ -85,15 +88,17 @@ export function referenceTokenOptions() {
       }
       event.preventDefault();
       event.stopPropagation();
-      findReferences(identifier);
+      findReferences(identifier[0]);
     },
     onTokenEnter(token, event) {
-      if (isReferenceClick(event) && identifierAtPointer(token, event)) {
-        underlineToken(token.tokenElement);
-      }
+      hoveredToken = token;
+      token.tokenElement.addEventListener("pointermove", updateTokenUnderline);
+      updateTokenUnderline(event);
     },
-    onTokenLeave() {
-      underlineToken(undefined);
+    onTokenLeave(token) {
+      token.tokenElement.removeEventListener("pointermove", updateTokenUnderline);
+      hoveredToken = undefined;
+      underlineToken();
     },
   };
 }
@@ -132,11 +137,11 @@ function isReferenceClick(event) {
 function identifierAtPointer(token, event) {
   const identifiers = [...token.tokenText.matchAll(IDENTIFIER_PATTERN)];
   if (identifiers.length <= 1) {
-    return identifiers[0]?.[0] || "";
+    return identifiers[0];
   }
   const offset = pointerOffsetInToken(token, event);
   const hit = identifiers.find((match) => offset >= match.index && offset <= match.index + match[0].length);
-  return (hit || identifiers[0])[0];
+  return hit || identifiers[0];
 }
 
 function pointerOffsetInToken(token, event) {
@@ -157,16 +162,42 @@ function pointerOffsetInToken(token, event) {
   return offset;
 }
 
-function underlineToken(element) {
+function updateTokenUnderline(event) {
+  const identifier = isReferenceClick(event) && identifierAtPointer(hoveredToken, event);
+  underlineToken(hoveredToken.tokenElement, identifier);
+}
+
+function underlineToken(element, identifier) {
+  if (!identifier) {
+    element = undefined;
+  }
   if (underlinedToken && underlinedToken !== element) {
-    underlinedToken.style.removeProperty("text-decoration");
     underlinedToken.style.removeProperty("cursor");
   }
   underlinedToken = element;
-  if (element) {
-    element.style.textDecoration = "underline";
-    element.style.cursor = "pointer";
+  CSS.highlights.delete(REFERENCE_HIGHLIGHT);
+  if (!element) {
+    return;
   }
+  const range = document.createRange();
+  const start = identifier.index;
+  const end = start + identifier[0].length;
+  const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+  let offset = 0;
+  while (walker.nextNode()) {
+    const node = walker.currentNode;
+    const nextOffset = offset + node.nodeValue.length;
+    if (start >= offset && start < nextOffset) {
+      range.setStart(node, start - offset);
+    }
+    if (end <= nextOffset) {
+      range.setEnd(node, end - offset);
+      break;
+    }
+    offset = nextOffset;
+  }
+  CSS.highlights.set(REFERENCE_HIGHLIGHT, new Highlight(range));
+  element.style.cursor = "pointer";
 }
 
 function scheduleLiveSearch() {
