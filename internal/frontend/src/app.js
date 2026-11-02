@@ -4,7 +4,7 @@ import {
   DIFF_STYLE_UNIFIED,
 } from "./constants.js";
 import { requestJSON } from "./api.js";
-import { clearActiveComment, handleCommentShortcut, syncCommentSummary } from "./comments.js";
+import { clearActiveComment, handleCommentShortcut, renderCommentNavigator } from "./comments.js";
 import { completeConnection, connectionLost, connectToServer, syncComments } from "./connection.js";
 import {
   bindWorkerCleanup,
@@ -75,14 +75,14 @@ async function init() {
     els.diff.replaceChildren();
     state.codeView.setup(els.diff);
     renderDiffStats();
-    syncCommentSummary();
 
     const firstFile = state.files[0];
     if (firstFile) {
       renderDiffs();
       setCurrentPath(firstFile.name, { scrollDiff: false, selectTree: true });
-      els.status.textContent = statusText();
+      els.status.textContent = `${state.files.length} file${state.files.length === 1 ? "" : "s"}`;
     } else {
+      renderCommentNavigator();
       els.status.textContent = "No files";
       renderDiffMessage("annotation-empty", "No files found in patch.");
     }
@@ -92,10 +92,6 @@ async function init() {
     }
     renderFatal(error);
   }
-}
-
-function statusText() {
-  return `${state.files.length} file${state.files.length === 1 ? "" : "s"}`;
 }
 
 function bindActions() {

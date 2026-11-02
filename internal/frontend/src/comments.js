@@ -1,13 +1,14 @@
-import { DEFAULT_COMMENT_SIDE } from "./constants.js";
 import { syncComments } from "./connection.js";
 import { renderDiffs, setCurrentPath } from "./diff-view.js";
 import { setIconButton } from "./icons.js";
 import { els, state } from "./state.js";
 import { isEditableTarget, stopDiffEvents } from "./util.js";
 
+const DEFAULT_COMMENT_SIDE = "additions";
+
 export function annotationsForFile(file) {
-  const comments = state.comments.filter((comment) => sameFileComment(comment, file));
-  if (state.draft && sameFileComment(state.draft, file)) {
+  const comments = state.comments.filter((comment) => comment.path === file.name);
+  if (state.draft?.path === file.name) {
     comments.push(state.draft);
   }
   return comments.map((comment) => ({
@@ -25,7 +26,6 @@ export function startDraft(path, range) {
   const normalized = normalizeRange(range);
   setCurrentPath(path, { scrollDiff: false, selectTree: true });
   clearActiveComment();
-  state.selectedCommentId = "";
   state.draft = {
     id: `draft-${crypto.randomUUID()}`,
     path: file.name,
@@ -230,10 +230,6 @@ export function applyActiveSelection() {
   });
 }
 
-export function syncCommentSummary() {
-  renderCommentNavigator();
-}
-
 export function handleCommentShortcut(event) {
   if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey || isEditableTarget(event.target)) {
     return false;
@@ -286,10 +282,6 @@ function annotationSide(comment) {
   return comment.end_side || comment.side || DEFAULT_COMMENT_SIDE;
 }
 
-function sameFileComment(comment, file) {
-  return comment.path === file.name;
-}
-
 function rangeLabel(comment) {
   const side = comment.side || "line";
   if (comment.start_line === comment.end_line) {
@@ -298,7 +290,7 @@ function rangeLabel(comment) {
   return `${side} lines ${comment.start_line}-${comment.end_line}`;
 }
 
-function renderCommentNavigator() {
+export function renderCommentNavigator() {
   const comments = orderedComments();
   const count = comments.length;
   els.commentNavigatorSummary.textContent = String(count);

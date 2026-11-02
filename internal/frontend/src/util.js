@@ -1,4 +1,4 @@
-import { FALLBACK_ROOT_FONT_SIZE } from "./constants.js";
+const FALLBACK_ROOT_FONT_SIZE = 16;
 
 export function clamp(value, min, max) {
   return Math.min(Math.max(value, min), max);

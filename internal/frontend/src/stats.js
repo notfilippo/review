@@ -20,15 +20,15 @@ export function computeDiffStats(files) {
 export function renderDiffStats() {
   const stats = state.diffStats;
   els.diffStatsSummary.textContent = `${stats.lines.toLocaleString()} lines`;
-  els.diffStats.replaceChildren(
-    createChangeBar(stats),
-    createStatGrid(
-      createStatItem("Files", stats.files),
-      createStatItem("Additions", stats.additions, "addition"),
-      createStatItem("Deletions", stats.deletions, "deletion"),
-      createStatItem("Lines", stats.lines),
-    ),
+  const grid = document.createElement("dl");
+  grid.className = "diff-stats-grid";
+  grid.append(
+    createStatItem("Files", stats.files),
+    createStatItem("Additions", stats.additions, "addition"),
+    createStatItem("Deletions", stats.deletions, "deletion"),
+    createStatItem("Lines", stats.lines),
   );
+  els.diffStats.replaceChildren(createChangeBar(stats), grid);
 }
 
 function createChangeBar(stats) {
@@ -45,13 +45,6 @@ function createChangeBar(stats) {
   }
   bar.append(additions, deletions);
   return bar;
-}
-
-function createStatGrid(...items) {
-  const grid = document.createElement("dl");
-  grid.className = "diff-stats-grid";
-  grid.append(...items);
-  return grid;
 }
 
 function createStatItem(label, value, tone = "") {

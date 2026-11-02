@@ -1,12 +1,11 @@
-import {
-  DIFF_STYLE_SPLIT,
-  SIDEBAR_RESIZE_STEP,
-  SIDEBAR_WIDTH_STORAGE_KEY,
-} from "./constants.js";
+import { DIFF_STYLE_SPLIT } from "./constants.js";
 import { allFilesCollapsed } from "./diff-view.js";
 import { setIconButton } from "./icons.js";
 import { els, narrowViewportQuery, state } from "./state.js";
 import { readStorageValue, writeStorageValue } from "./storage.js";
+
+const SIDEBAR_RESIZE_STEP = 16;
+const SIDEBAR_WIDTH_STORAGE_KEY = "review.sidebarWidth";
 
 export function isNarrowViewport() {
   return narrowViewportQuery.matches;

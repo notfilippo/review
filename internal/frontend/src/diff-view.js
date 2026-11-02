@@ -1,17 +1,12 @@
-import {
-  DIFF_BOTTOM_PADDING_REM,
-  DIFF_THEME,
-  NEXT_FILE_KEYS,
-  PREVIOUS_FILE_KEYS,
-} from "./constants.js";
+import { DIFF_THEME } from "./constants.js";
 import createDiffsWorker from "https://esm.sh/@pierre/diffs@1.5.2/worker/worker-portable.js?worker";
 import {
   annotationsForFile,
   applyActiveSelection,
   createAnnotationCard,
   findAnnotationComment,
+  renderCommentNavigator,
   startDraft,
-  syncCommentSummary,
 } from "./comments.js";
 import { setIconButton } from "./icons.js";
 import { syncCollapseToggle } from "./layout.js";
@@ -19,6 +14,10 @@ import { referenceTokenOptions } from "./search.js";
 import { els, state } from "./state.js";
 import { syncTreeSelection } from "./tree.js";
 import { clamp, isEditableTarget, rem } from "./util.js";
+
+const DIFF_BOTTOM_PADDING_REM = 0.5;
+const NEXT_FILE_KEYS = new Set(["j", "]"]);
+const PREVIOUS_FILE_KEYS = new Set(["k", "["]);
 
 export function renderDiffLoading(message) {
   els.diff.replaceChildren();
@@ -131,11 +130,11 @@ export function setCurrentPath(path, options = {}) {
 }
 
 export function renderDiffs() {
-  nextRenderVersion();
+  state.renderVersion += 1;
   state.codeView.setItems(state.files.map((file) => codeViewItem(file)));
   state.codeView.render(true);
   applyActiveSelection();
-  syncCommentSummary();
+  renderCommentNavigator();
   syncCollapseToggle();
 }
 
@@ -150,17 +149,13 @@ function codeViewItem(file) {
   };
 }
 
-function nextRenderVersion() {
-  state.renderVersion += 1;
-}
-
 function refreshFileDiff(path) {
   const file = state.filesByPath.get(path);
   if (!file || !state.codeView) {
     return false;
   }
 
-  nextRenderVersion();
+  state.renderVersion += 1;
   if (!state.codeView.getItem(file.name)) {
     return false;
   }
@@ -168,7 +163,7 @@ function refreshFileDiff(path) {
   const updated = state.codeView.updateItem(codeViewItem(file));
   if (updated) {
     applyActiveSelection();
-    syncCommentSummary();
+    renderCommentNavigator();
     syncCollapseToggle();
   }
   return updated;

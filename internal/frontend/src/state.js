@@ -1,9 +1,7 @@
-import { DIFF_STYLE_SPLIT, NARROW_VIEWPORT_QUERY } from "./constants.js";
+import { DIFF_STYLE_SPLIT } from "./constants.js";
 
-export const narrowViewportQuery = window.matchMedia(NARROW_VIEWPORT_QUERY);
+export const narrowViewportQuery = window.matchMedia("(max-width: 56.25rem)");
 
-// Single mutable store shared across modules. diffStyle is seeded from storage
-// in init() before the diff renders.
 export const state = {
   token: new URLSearchParams(window.location.search).get("token") || "",
   comments: [],

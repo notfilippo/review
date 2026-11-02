@@ -1,5 +1,4 @@
 import { streamJSONLines } from "./api.js";
-import { SEARCH_DEBOUNCE_MS, SEARCH_MIN_LIVE_LENGTH } from "./constants.js";
 import { renderDiffs, setCurrentPath } from "./diff-view.js";
 import { createLucideIcon, setIconButton } from "./icons.js";
 import { isNarrowViewport, setSidebarTab, setTreeCollapsed } from "./layout.js";
@@ -7,6 +6,8 @@ import { closePeek, openPeek, setupPeek } from "./peek.js";
 import { els, state } from "./state.js";
 import { afterNextPaint, closestAcrossShadow, queryDeep } from "./util.js";
 
+const SEARCH_DEBOUNCE_MS = 300;
+const SEARCH_MIN_LIVE_LENGTH = 3;
 const IDENTIFIER_PATTERN = /[\p{L}\p{N}_$]+/gu;
 const FLASH_BACKGROUND = "color-mix(in srgb, var(--accent-2) 30%, transparent)";
 const FLASH_MS = 1600;

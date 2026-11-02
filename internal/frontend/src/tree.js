@@ -1,6 +1,5 @@
 import { setCurrentPath } from "./diff-view.js";
 import { isNarrowViewport, setTreeCollapsed } from "./layout.js";
-import { gitStatus } from "./patch-files.js";
 import { els, state } from "./state.js";
 
 export function setupTree(FileTree) {
@@ -30,6 +29,17 @@ export function setupTree(FileTree) {
     },
   });
   state.tree.render({ containerWrapper: els.tree });
+}
+
+function gitStatus(status) {
+  switch (status) {
+    case "Added":
+      return "added";
+    case "Deleted":
+      return "deleted";
+    default:
+      return "modified";
+  }
 }
 
 function selectedTreeFilePath(selectedPaths) {

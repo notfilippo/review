@@ -1,9 +1,3 @@
-import {
-  TREE_STATUS_ADDED,
-  TREE_STATUS_DELETED,
-  TREE_STATUS_MODIFIED,
-} from "./constants.js";
-
 // Each session file carries its patch and both full versions, so Pierre can
 // expand unchanged context locally.
 export function buildReviewFiles(session, processFile) {
@@ -35,15 +29,4 @@ export function orderFilesForTree(files, prepareFileTreeInput) {
     .paths
     .map((path) => byPath.get(path))
     .filter(Boolean);
-}
-
-export function gitStatus(status) {
-  switch (status) {
-    case "Added":
-      return TREE_STATUS_ADDED;
-    case "Deleted":
-      return TREE_STATUS_DELETED;
-    default:
-      return TREE_STATUS_MODIFIED;
-  }
 }
