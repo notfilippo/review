@@ -174,6 +174,9 @@ impl SearchCorpus {
         let mut overlay_paths = self.overlay.keys().collect::<Vec<_>>();
         overlay_paths.sort();
         for path in overlay_paths {
+            if self.should_stop(&run) {
+                break;
+            }
             let matches = search_buffer(&self.overlay[path], &search.matchers);
             run.record(path, true, 0, matches);
         }
@@ -377,7 +380,7 @@ fn parent_dir(path: &str) -> String {
 fn outermost_dirs(dirs: BTreeSet<String>) -> Vec<String> {
     let mut kept: Vec<String> = Vec::new();
     for dir in dirs {
-        let nested = kept.last().is_some_and(|outer| {
+        let nested = kept.iter().any(|outer| {
             outer.is_empty()
                 || dir
                     .strip_prefix(outer.as_str())
@@ -591,7 +594,8 @@ fn normalize_request_path(path: &str) -> Result<String> {
 #[cfg(test)]
 mod tests {
     use std::fs;
-    use std::sync::Mutex;
+    use std::path::PathBuf;
+    use std::sync::{Arc, Mutex};
     use std::time::{SystemTime, UNIX_EPOCH};
 
     use super::{
@@ -696,6 +700,43 @@ mod tests {
             [vec![String::new()]]
         );
         assert_eq!(proximity_scopes(std::iter::empty()), [vec![String::new()]]);
+    }
+
+    #[test]
+    fn scopes_drop_nested_directories_even_with_similar_sibling_names() {
+        assert_eq!(
+            proximity_scopes(["a/file.rs", "a-b/file.rs", "a/b/file.rs"].into_iter()),
+            [
+                vec!["a".to_string(), "a-b".to_string()],
+                vec![String::new()]
+            ]
+        );
+    }
+
+    #[test]
+    fn superseded_search_does_not_scan_reviewed_files() {
+        let mut corpus = SearchCorpus::new(PathBuf::new(), &ReviewInput { files: Vec::new() });
+        corpus
+            .overlay
+            .insert("changed.rs".to_string(), Arc::from(&b"needle\n"[..]));
+        let search = corpus
+            .prepare(&request("needle", false))
+            .expect("prepare search");
+        corpus
+            .prepare(&request("newer", false))
+            .expect("prepare newer search");
+        let events = Mutex::new(Vec::new());
+
+        corpus.run(&search, &|event| {
+            events.lock().expect("events mutex").push(event);
+            true
+        });
+
+        let events = events.into_inner().expect("events mutex");
+        assert!(
+            matches!(events.as_slice(), [SearchEvent::Done(summary)] if summary.cancelled),
+            "{events:?}"
+        );
     }
 
     #[test]
