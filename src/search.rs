@@ -596,7 +596,8 @@ mod tests {
     use std::fs;
     use std::path::PathBuf;
     use std::sync::{Arc, Mutex};
-    use std::time::{SystemTime, UNIX_EPOCH};
+
+    use tempfile::tempdir;
 
     use super::{
         Matchers, SearchCorpus, SearchEvent, SearchRequest, normalize_request_path,
@@ -741,12 +742,7 @@ mod tests {
 
     #[test]
     fn run_streams_diff_files_then_nearest_directories() {
-        let unique = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("current time follows the Unix epoch")
-            .as_nanos();
-        let root =
-            std::env::temp_dir().join(format!("review-search-{}-{unique}", std::process::id()));
+        let root = tempdir().expect("create test repository root");
         for (path, contents) in [
             ("a/b/new.rs", "stale on disk: helper\n"),
             ("a/b/sibling.rs", "helper();\n"),
@@ -755,7 +751,7 @@ mod tests {
             ("ignored/skip.rs", "helper();\n"),
             (".gitignore", "ignored/\n"),
         ] {
-            let path = root.join(path);
+            let path = root.path().join(path);
             fs::create_dir_all(path.parent().expect("test path has a parent"))
                 .expect("create test dir");
             fs::write(path, contents).expect("write test file");
@@ -775,7 +771,7 @@ mod tests {
                 },
             }],
         };
-        let corpus = SearchCorpus::new(root.clone(), &input);
+        let corpus = SearchCorpus::new(root.path().to_path_buf(), &input);
         let search = corpus
             .prepare(&request("helper", true))
             .expect("prepare search");
@@ -812,6 +808,5 @@ mod tests {
                 "done 4 false",
             ]
         );
-        fs::remove_dir_all(root).expect("remove test dir");
     }
 }

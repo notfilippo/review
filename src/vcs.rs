@@ -281,8 +281,8 @@ mod tests {
     use std::fs;
     #[cfg(unix)]
     use std::os::unix::fs::symlink;
-    use std::path::PathBuf;
-    use std::time::{SystemTime, UNIX_EPOCH};
+
+    use tempfile::tempdir;
 
     use super::{FileStatus, build_review_input, normalize_path_filters};
     use crate::diff::{FileDiffInput, FileSnapshot};
@@ -304,32 +304,22 @@ mod tests {
         }
     }
 
-    fn temp_dir(name: &str) -> PathBuf {
-        let unique = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("current time follows the Unix epoch")
-            .as_nanos();
-        std::env::temp_dir().join(format!("review-{name}-{}-{unique}", std::process::id()))
-    }
-
     #[test]
     fn repository_root_disables_path_filtering() {
-        let root = temp_dir("root-filter");
-        fs::create_dir_all(&root).expect("create test repository root");
+        let root = tempdir().expect("create test repository root");
 
-        let filters =
-            normalize_path_filters(&root, &root, &[".".to_string()]).expect("normalize root");
+        let filters = normalize_path_filters(root.path(), root.path(), &[".".to_string()])
+            .expect("normalize root");
 
         assert!(filters.is_empty());
-        fs::remove_dir_all(root).expect("remove test repository root");
     }
 
     #[cfg(unix)]
     #[test]
     fn final_symlink_component_is_not_resolved() {
-        let container = temp_dir("symlink-filter");
-        let root = container.join("repo");
-        let outside = container.join("outside");
+        let container = tempdir().expect("create test directory");
+        let root = container.path().join("repo");
+        let outside = container.path().join("outside");
         fs::create_dir_all(&root).expect("create test repository root");
         fs::write(&outside, "outside").expect("create symlink target");
         symlink(&outside, root.join("link")).expect("create path-filter symlink");
@@ -340,7 +330,6 @@ mod tests {
                 .expect("normalize symlinks");
 
         assert_eq!(filters, ["link", "root-link"]);
-        fs::remove_dir_all(container).expect("remove symlink test directory");
     }
 
     #[test]
