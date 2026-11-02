@@ -8,9 +8,13 @@ A local browser UI for reviewing [Jujutsu](https://jj-vcs.github.io/jj/latest/) 
 
 ## ⚙️ Install
 
+You need [Rust and Cargo](https://rustup.rs/) from the current stable toolchain, plus a modern browser with internet access. The frontend loads its JavaScript libraries from [esm.sh](https://esm.sh/).
+
 ```sh
-cargo install --locked --git ssh://git@github.com/notfilippo/review.git
+cargo install --locked --git https://github.com/notfilippo/review.git
 ```
+
+CI tests the project on Linux. macOS is also used for development. Windows is not currently covered by CI.
 
 ## ▶️ Usage
 
@@ -21,6 +25,13 @@ review
 ```
 
 The browser opens with the current changes. Leave comments inline, then click **Finish review** to print them to stdout as Markdown.
+
+For example:
+
+```markdown
+- `src/config.rs` additions line 12: Could this timeout be configurable?
+- `src/server.rs` additions lines 28-31: Please handle the connection error here.
+```
 
 By default, `review` compares the repository mainline (`trunk()` for jj, the default branch for Git) with your current working copy, including uncommitted changes.
 
@@ -69,10 +80,6 @@ review --port 8080
 - **Search:** `⌘F` / `Ctrl+F`, or the search button, searches the repository for the current selection or anything you type. Match case, whole word and regex are toggles next to the input.
 - **Finish:** click **Finish review** to print every comment to stdout as Markdown.
 
-A warning appears if the server connection is lost. You can keep browsing the diff and saving comments while disconnected. Keep the tab open and use **Copy restart command**. Run the command in your terminal to restart the server with the same port and session. The tab reconnects and syncs its comments automatically, including changes saved while disconnected. Comments are also cached in this browser until the review is finished.
-
-The restart command preserves the review options and reloads the diff from the repository, so keep the checkout unchanged during recovery. On Windows, run the copied command in PowerShell.
-
 Search results:
 
 - Stream in nearest the diff first: the reviewed files, their directories, then each parent directory up to the repository root. In large monorepos nearby references show up immediately while the rest of the repository is still being walked; **Stop** ends a long search.
@@ -92,7 +99,7 @@ Search results:
 | `⌘Enter` / `Ctrl+Enter` | Save the comment being edited |
 | `Esc` | Cancel the comment draft, clear the search, or close the preview |
 
-## 🤖 AI Agent Workflow
+## 🤖 Use with coding agents
 
 Two workflows work well with Codex, Claude, or another coding agent.
 
@@ -104,19 +111,33 @@ Ask the agent to pick the right diff and wait for the browser review:
 Use the `review` CLI to let me review the full code change. Check `review --help`, choose the right diff options for this repository, wait for me to finish in the browser, then use the Markdown comments from stdout to fix the issues.
 ```
 
-**You run `!review`**
+**You run the review**
 
-Use this when you want to pick the diff yourself and drive the browser review:
+Run `review` in your terminal, finish the browser review, then paste the Markdown output into your agent's conversation with an instruction such as:
 
-```sh
+```text
+Use these review comments to fix the issues.
+```
+
+In [Claude Code's shell mode](https://code.claude.com/docs/en/interactive-mode#shell-mode-with--prefix), you can run it directly from the agent prompt:
+
+```text
 !review
 ```
+
+The command's output is added to the conversation. After finishing the review, ask:
 
 ```text
 Use the review comments above and fix them.
 ```
 
-When the command exits, the Markdown comments are still in the conversation context.
+`!review` is an agent-interface shortcut. In a regular terminal, use `review`.
+
+## Troubleshooting
+
+A warning appears if the server connection is lost. You can keep browsing the diff and saving comments while disconnected. Keep the tab open and use **Copy restart command**. Run the command in your terminal to restart the server with the same port and session. The tab reconnects and syncs its comments automatically, including changes saved while disconnected. Comments are also cached in this browser until the review is finished.
+
+The restart command preserves the review options and reloads the diff from the repository, so keep the checkout unchanged during recovery. On Windows, run the copied command in PowerShell.
 
 ## 🛠️ Development
 
@@ -125,12 +146,28 @@ When the command exits, the Markdown comments are still in the conversation cont
 The frontend is plain ES modules with no build step. It uses Pierre's [@pierre/diffs](https://www.npmjs.com/package/@pierre/diffs) and [@pierre/trees](https://www.npmjs.com/package/@pierre/trees), loaded from esm.sh, so the browser needs network access to render the UI.
 
 ```sh
-cargo build
-cargo test
-cargo clippy --all-targets -- -D warnings
+cargo build --locked
+cargo test --locked
+cargo clippy --locked --all-targets -- -D warnings
 ```
 
 Frontend changes need a rebuild because the assets are embedded in the binary.
+
+Bug reports and pull requests are welcome. For bugs, include the command you ran, whether the repository uses Git or jj, and the expected and actual behavior. Run the checks above before submitting a code change.
+
+### Regenerate the screenshot
+
+The screenshot tool serves the real frontend with a fixed demo review, then captures it with Playwright. It does not use your current repository changes or comments, and it does not need a Rust build.
+
+With Node.js 22 or newer, run these commands from the repository root:
+
+```sh
+npm ci --prefix tools/screenshot
+npm exec --prefix tools/screenshot -- playwright install chromium
+npm run --prefix tools/screenshot capture
+```
+
+This updates [docs/demo.png](docs/demo.png). Internet access is needed to load the frontend libraries. On Linux, Playwright may also need system packages; see its [browser installation guide](https://playwright.dev/docs/browsers#install-system-dependencies).
 
 ## License
 
