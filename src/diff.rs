@@ -176,7 +176,7 @@ fn quote_git_path(path: &str) -> String {
             b'\r' => quoted.push_str("\\r"),
             b'"' => quoted.push_str("\\\""),
             b'\\' => quoted.push_str("\\\\"),
-            0x20..=0x7e => quoted.push(byte as char),
+            0x20..=0x7e => quoted.push(char::from(byte)),
             other => quoted.push_str(&format!("\\{other:03o}")),
         }
     }

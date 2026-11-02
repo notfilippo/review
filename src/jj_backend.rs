@@ -261,22 +261,22 @@ async fn revset_diff_target(
             bail!("revset {expression:?} resolved to no commits");
         }
         let root_commit = repo.store().root_commit();
-        let from = merge_commit_trees(repo.as_ref(), std::slice::from_ref(&root_commit)).await?;
-        let to = merge_commit_trees(repo.as_ref(), std::slice::from_ref(&root_commit)).await?;
-        return Ok(RevsetDiffTarget { from, to });
+        let tree = merge_commit_trees(repo.as_ref(), std::slice::from_ref(&root_commit)).await?;
+        return Ok(RevsetDiffTarget {
+            from: tree.clone(),
+            to: tree,
+        });
     }
 
     let commit_by_id = commits
         .iter()
-        .map(|commit| (commit.id().hex(), commit.clone()))
+        .map(|commit| (commit.id().clone(), commit.clone()))
         .collect::<HashMap<_, _>>();
-    let commit_ids = commit_by_id.keys().cloned().collect::<HashSet<_>>();
     let mut parent_ids_in_set = HashSet::new();
     for commit in &commits {
         for parent_id in commit.parent_ids() {
-            let parent_id = parent_id.hex();
-            if commit_ids.contains(&parent_id) {
-                parent_ids_in_set.insert(parent_id);
+            if commit_by_id.contains_key(parent_id) {
+                parent_ids_in_set.insert(parent_id.clone());
             }
         }
     }
@@ -287,13 +287,13 @@ async fn revset_diff_target(
             commit
                 .parent_ids()
                 .iter()
-                .all(|parent_id| !commit_ids.contains(&parent_id.hex()))
+                .all(|parent_id| !commit_by_id.contains_key(parent_id))
         })
         .cloned()
         .collect::<Vec<_>>();
     let heads = commits
         .iter()
-        .filter(|commit| !parent_ids_in_set.contains(&commit.id().hex()))
+        .filter(|commit| !parent_ids_in_set.contains(commit.id()))
         .cloned()
         .collect::<Vec<_>>();
     if roots.is_empty() || heads.is_empty() {
@@ -304,14 +304,14 @@ async fn revset_diff_target(
     let mut base_ids = HashSet::new();
     for root in &roots {
         for parent in root.parents().await? {
-            if base_ids.insert(parent.id().hex()) {
+            if base_ids.insert(parent.id().clone()) {
                 base_commits.push(parent);
             }
         }
     }
     if base_commits.is_empty() {
         let root_commit = repo.store().root_commit();
-        base_ids.insert(root_commit.id().hex());
+        base_ids.insert(root_commit.id().clone());
         base_commits.push(root_commit);
     }
 
@@ -326,19 +326,19 @@ async fn revset_diff_target(
 }
 
 async fn ensure_revset_has_no_gaps(
-    commit_by_id: &HashMap<String, Commit>,
-    base_ids: &HashSet<String>,
+    commit_by_id: &HashMap<CommitId, Commit>,
+    base_ids: &HashSet<CommitId>,
     heads: &[Commit],
     expression: &str,
 ) -> Result<()> {
     let mut stack = heads.to_vec();
     let mut visited = HashSet::new();
     while let Some(commit) = stack.pop() {
-        let id = commit.id().hex();
-        if base_ids.contains(&id) || !visited.insert(id.clone()) {
+        let id = commit.id();
+        if base_ids.contains(id) || !visited.insert(id.clone()) {
             continue;
         }
-        let Some(commit) = commit_by_id.get(&id) else {
+        let Some(commit) = commit_by_id.get(id) else {
             bail!("revset {expression:?} has gaps and cannot be reviewed as one diff");
         };
         stack.extend(commit.parents().await?);
