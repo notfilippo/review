@@ -278,6 +278,7 @@ fn snapshot_contents(snapshot: Option<&FileSnapshot>) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(unix)]
     use std::fs;
     #[cfg(unix)]
     use std::os::unix::fs::symlink;
