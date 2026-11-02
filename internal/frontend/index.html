@@ -33,6 +33,15 @@
           <button id="done" class="icon-button primary" type="button" aria-label="Finish review" title="Finish review"></button>
         </div>
       </header>
+      <section id="connection-recovery" class="connection-recovery" aria-label="Server recovery" hidden>
+        <p id="connection-message" role="alert"></p>
+        <p>Keep this tab open. Run this command in your terminal to restart the server. Your comments will sync when it reconnects.</p>
+        <textarea id="restart-command" aria-label="Restart server command" rows="2" readonly spellcheck="false"></textarea>
+        <div class="connection-actions">
+          <button id="copy-restart" type="button">Copy restart command</button>
+          <button id="retry-connection" type="button">Retry connection</button>
+        </div>
+      </section>
       <main class="workspace">
         <div id="tree-backdrop" class="tree-backdrop" aria-hidden="true"></div>
         <aside class="sidebar">

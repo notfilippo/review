@@ -17,6 +17,7 @@ pub struct CliOptions {
     pub from_rev: Option<String>,
     pub to_rev: Option<String>,
     pub paths: Vec<String>,
+    pub resume_token: Option<String>,
 }
 
 #[derive(Debug, Parser)]
@@ -36,6 +37,12 @@ struct Args {
     addr: SocketAddr,
     #[arg(long = "port", value_name = "PORT", help = "Serve on 127.0.0.1:<PORT>")]
     port: Option<u16>,
+    #[arg(
+        long,
+        value_name = "TOKEN",
+        help = "Reconnect an existing browser review after restarting its server"
+    )]
+    resume_token: Option<String>,
     #[arg(
         short = 'r',
         value_name = "REVSET",
@@ -85,6 +92,7 @@ pub fn parse() -> Result<CliOptions> {
         from_rev: trim_optional(args.from_rev),
         to_rev: trim_optional(args.to_rev),
         paths: trim_required_values(args.paths, "path")?,
+        resume_token: args.resume_token,
     })
 }
 

@@ -10,7 +10,7 @@ export async function requestJSON(path, options = {}) {
       "X-Review-Token": state.token,
       ...(options.headers || {}),
     },
-    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    signal: options.signal || AbortSignal.timeout(REQUEST_TIMEOUT_MS),
   });
   if (!response.ok) {
     throw new Error(await responseErrorMessage(response));

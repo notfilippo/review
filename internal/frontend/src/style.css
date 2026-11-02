@@ -260,6 +260,38 @@ textarea {
   gap: var(--space-2);
 }
 
+.connection-recovery {
+  flex: none;
+  max-height: 40dvh;
+  overflow: auto;
+  padding: var(--space-3);
+  border-bottom: 0.125rem solid var(--danger);
+  background: color-mix(in srgb, var(--danger) 8%, var(--panel));
+}
+
+.connection-recovery p {
+  margin: 0 0 var(--space-2);
+}
+
+.connection-recovery p:first-child {
+  color: var(--danger);
+  font-size: var(--font-size-title);
+  font-weight: 600;
+}
+
+.connection-recovery textarea {
+  min-height: 0;
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+}
+
+.connection-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+
 .workspace {
   display: grid;
   grid-template-columns: clamp(var(--sidebar-min), var(--sidebar-width), var(--sidebar-max)) minmax(0, 1fr);

@@ -40,6 +40,11 @@ export const state = {
 
 export const els = {
   status: document.querySelector("#status"),
+  connectionRecovery: document.querySelector("#connection-recovery"),
+  connectionMessage: document.querySelector("#connection-message"),
+  restartCommand: document.querySelector("#restart-command"),
+  copyRestart: document.querySelector("#copy-restart"),
+  retryConnection: document.querySelector("#retry-connection"),
   workspace: document.querySelector(".workspace"),
   sidebar: document.querySelector(".sidebar"),
   sidebarResizer: document.querySelector("#sidebar-resizer"),

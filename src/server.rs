@@ -1,4 +1,5 @@
 use std::convert::Infallible;
+use std::env;
 use std::net::SocketAddr;
 use std::process::Command;
 use std::sync::{Arc, Mutex};
@@ -27,16 +28,20 @@ const SEARCH_EVENT_BUFFER: usize = 256;
 
 struct ReviewSession {
     token: String,
+    server_id: String,
     input: ReviewInput,
     corpus: SearchCorpus,
     comments: Mutex<Vec<ReviewComment>>,
+    restart_command: String,
     done: Notify,
 }
 
 #[derive(Serialize)]
 struct SessionResponse<'a> {
+    server_id: &'a str,
     files: &'a [ReviewFile],
     comments: Vec<ReviewComment>,
+    restart_command: &'a str,
 }
 
 #[derive(Deserialize)]
@@ -64,25 +69,47 @@ struct OkResponse {
     ok: bool,
 }
 
+#[derive(Serialize)]
+struct HealthResponse<'a> {
+    server_id: &'a str,
+}
+
 pub async fn serve_review(
     options: &CliOptions,
     input: ReviewInput,
     corpus: SearchCorpus,
 ) -> Result<Vec<ReviewComment>> {
-    let token = new_token().context("create review token")?;
+    let token = match &options.resume_token {
+        Some(token) => {
+            let bytes = hex::decode(token).context("decode resume token")?;
+            if bytes.len() != TOKEN_BYTES {
+                bail!(
+                    "resume token must contain {} hexadecimal characters",
+                    TOKEN_BYTES * 2
+                );
+            }
+            token.clone()
+        }
+        None => new_token().context("create review token")?,
+    };
+    let listener = bind_listener(options).await?;
+    let addr = listener.local_addr().context("read listener address")?;
+    let restart_command = restart_command(options, addr, &token)?;
     let session = Arc::new(ReviewSession {
         token,
+        server_id: new_token().context("create server ID")?,
         input,
         corpus,
         comments: Mutex::new(Vec::new()),
+        restart_command,
         done: Notify::new(),
     });
 
-    let listener = bind_listener(options).await?;
-    let addr = listener.local_addr().context("read listener address")?;
     let url = format!("http://{addr}/?token={}", session.token);
     eprintln!("Review UI: {url}");
-    if let Err(err) = open_browser(&url) {
+    if options.resume_token.is_none()
+        && let Err(err) = open_browser(&url)
+    {
         eprintln!("Could not open browser: {err}");
     }
 
@@ -125,6 +152,7 @@ pub async fn serve_review(
 fn routes(session: Arc<ReviewSession>) -> Router {
     let api = Router::new()
         .route("/api/session", get(handle_session))
+        .route("/api/health", get(handle_health))
         .route("/api/comments", put(handle_comments))
         .route("/api/search", get(handle_search))
         .route("/api/file", get(handle_file))
@@ -165,8 +193,17 @@ async fn bind_listener(options: &CliOptions) -> Result<TcpListener> {
 
 async fn handle_session(State(session): State<Arc<ReviewSession>>) -> Response {
     Json(SessionResponse {
+        server_id: &session.server_id,
         files: &session.input.files,
         comments: session.comments_snapshot(),
+        restart_command: &session.restart_command,
+    })
+    .into_response()
+}
+
+async fn handle_health(State(session): State<Arc<ReviewSession>>) -> Response {
+    Json(HealthResponse {
+        server_id: &session.server_id,
     })
     .into_response()
 }
@@ -279,6 +316,48 @@ fn new_token() -> Result<String> {
     Ok(hex::encode(raw))
 }
 
+fn restart_command(options: &CliOptions, addr: SocketAddr, token: &str) -> Result<String> {
+    let executable = env::current_exe().context("locate review executable")?;
+    let mut args = vec![
+        executable.to_string_lossy().into_owned(),
+        "--addr".to_string(),
+        addr.to_string(),
+        "--resume-token".to_string(),
+        token.to_string(),
+    ];
+    for revision in &options.revisions {
+        args.extend(["-r".to_string(), revision.clone()]);
+    }
+    if let Some(revision) = &options.from_rev {
+        args.extend(["--from".to_string(), revision.clone()]);
+    }
+    if let Some(revision) = &options.to_rev {
+        args.extend(["--to".to_string(), revision.clone()]);
+    }
+    args.push("--".to_string());
+    args.extend(options.paths.iter().cloned());
+    let args = args
+        .iter()
+        .map(|arg| shell_quote(arg))
+        .collect::<Vec<_>>()
+        .join(" ");
+    let cwd = shell_quote(&options.cwd.to_string_lossy());
+    if cfg!(windows) {
+        Ok(format!("Set-Location -LiteralPath {cwd}; & {args}"))
+    } else {
+        Ok(format!("cd {cwd} && {args}"))
+    }
+}
+
+fn shell_quote(value: &str) -> String {
+    let escaped = if cfg!(windows) {
+        value.replace('\'', "''")
+    } else {
+        value.replace('\'', "'\\''")
+    };
+    format!("'{escaped}'")
+}
+
 fn open_browser(url: &str) -> Result<()> {
     #[cfg(target_os = "macos")]
     {
@@ -312,4 +391,56 @@ fn error(status: StatusCode, message: &str) -> Response {
         }),
     )
         .into_response()
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use std::env;
+    use std::path::PathBuf;
+    use std::process::Command;
+
+    use super::restart_command;
+    use crate::cli::CliOptions;
+
+    #[test]
+    fn restart_command_preserves_review_arguments_and_bound_port() {
+        let options = CliOptions {
+            listen_addr: "127.0.0.1:7527".parse().unwrap(),
+            allow_port_fallback: true,
+            cwd: PathBuf::from("/"),
+            revisions: Vec::new(),
+            from_rev: Some("main".to_string()),
+            to_rev: Some("description('quoted $HOME `text`')".to_string()),
+            paths: vec!["src/user's $(exit 9).rs".to_string()],
+            resume_token: None,
+        };
+        let command =
+            restart_command(&options, "127.0.0.1:8100".parse().unwrap(), "token").unwrap();
+        let args = command.strip_prefix("cd '/' && ").unwrap();
+        let output = Command::new("sh")
+            .args(["-c", &format!("set -- {args}; printf '%s\\0' \"$@\"")])
+            .output()
+            .unwrap();
+        assert!(output.status.success());
+        let actual: Vec<_> = output
+            .stdout
+            .split(|byte| *byte == 0)
+            .filter(|arg| !arg.is_empty())
+            .collect();
+        let executable = env::current_exe().unwrap();
+        let expected = [
+            executable.to_str().unwrap(),
+            "--addr",
+            "127.0.0.1:8100",
+            "--resume-token",
+            "token",
+            "--from",
+            "main",
+            "--to",
+            "description('quoted $HOME `text`')",
+            "--",
+            "src/user's $(exit 9).rs",
+        ];
+        assert_eq!(actual, expected.map(str::as_bytes));
+    }
 }

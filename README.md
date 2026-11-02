@@ -69,6 +69,10 @@ review --port 8080
 - **Search:** `⌘F` / `Ctrl+F`, or the search button, searches the repository for the current selection or anything you type. Match case, whole word and regex are toggles next to the input.
 - **Finish:** click **Finish review** to print every comment to stdout as Markdown.
 
+A warning appears if the server connection is lost. You can keep browsing the diff and saving comments while disconnected. Keep the tab open and use **Copy restart command**. Run the command in your terminal to restart the server with the same port and session. The tab reconnects and syncs its comments automatically, including changes saved while disconnected. Comments are also cached in this browser until the review is finished.
+
+The restart command preserves the review options and reloads the diff from the repository, so keep the checkout unchanged during recovery. On Windows, run the copied command in PowerShell.
+
 Search results:
 
 - Stream in nearest the diff first: the reviewed files, their directories, then each parent directory up to the repository root. In large monorepos nearby references show up immediately while the rest of the repository is still being walked; **Stop** ends a long search.

@@ -5,6 +5,7 @@ import {
 } from "./constants.js";
 import { requestJSON } from "./api.js";
 import { clearActiveComment, handleCommentShortcut, syncCommentSummary } from "./comments.js";
+import { completeConnection, connectionLost, connectToServer, syncComments } from "./connection.js";
 import {
   bindWorkerCleanup,
   codeViewOptions,
@@ -49,6 +50,7 @@ async function init() {
       throw new Error("Missing review token");
     }
     bindActions();
+    const session = await connectToServer();
     const [
       { CodeView, getFiletypeFromFileName, processFile },
       { FileTree, prepareFileTreeInput },
@@ -59,9 +61,6 @@ async function init() {
       import("@pierre/diffs/worker"),
     ]);
     bindWorkerCleanup(terminateWorkerPoolSingleton);
-    renderDiffLoading("Loading review");
-    const session = await requestJSON("/api/session");
-    state.comments = Array.isArray(session.comments) ? session.comments : [];
     renderDiffLoading("Processing diff");
     await afterNextPaint();
     state.files = buildReviewFiles(session, processFile);
@@ -160,16 +159,19 @@ function bindActions() {
       renderDiffs();
     }
     try {
+      await syncComments();
       await requestJSON("/api/complete", {
         method: "POST",
         body: JSON.stringify({ comments: state.comments }),
       });
     } catch (error) {
+      connectionLost();
       els.status.textContent = `Failed to finish review: ${error.message}`;
       els.done.disabled = false;
       return;
     }
     state.completed = true;
+    completeConnection();
     els.status.textContent = "Completed";
     closeReviewWindow();
   });

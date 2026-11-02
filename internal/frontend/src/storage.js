@@ -17,6 +17,14 @@ export function writeStorageValue(key, value) {
   }
 }
 
+export function removeStorageValue(key) {
+  try {
+    localStorage.removeItem(key);
+  } catch {
+    // Storage can be disabled.
+  }
+}
+
 export function readSavedDiffStyle() {
   const value = readStorageValue(DIFF_STYLE_STORAGE_KEY);
   if (value === DIFF_STYLE_SPLIT || value === DIFF_STYLE_UNIFIED) {
