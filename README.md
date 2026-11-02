@@ -131,3 +131,7 @@ cargo clippy --all-targets -- -D warnings
 ```
 
 Frontend changes need a rebuild because the assets are embedded in the binary.
+
+## License
+
+[MIT](LICENSE), copyright 2026 Filippo Rossi.

@@ -3,6 +3,7 @@ name = "review"
 version = "0.1.0"
 edition = "2024"
 authors = ["Filippo Rossi"]
+license = "MIT"
 description = "Local browser review UI for jj and Git diffs"
 repository = "https://github.com/notfilippo/review"
 readme = "README.md"
