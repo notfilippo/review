@@ -35,7 +35,12 @@ struct Args {
         help = "Serve the review UI on this address"
     )]
     addr: SocketAddr,
-    #[arg(long = "port", value_name = "PORT", help = "Serve on 127.0.0.1:<PORT>")]
+    #[arg(
+        long = "port",
+        value_name = "PORT",
+        conflicts_with = "addr",
+        help = "Serve on 127.0.0.1:<PORT>"
+    )]
     port: Option<u16>,
     #[arg(
         long,
@@ -70,14 +75,7 @@ struct Args {
 pub fn parse() -> Result<CliOptions> {
     let matches = Args::command().get_matches();
     let addr_source = matches.value_source("addr");
-    let port_source = matches.value_source("port");
     let args = Args::from_arg_matches(&matches).unwrap_or_else(|err| err.exit());
-
-    if addr_source == Some(ValueSource::CommandLine)
-        && port_source == Some(ValueSource::CommandLine)
-    {
-        bail!("use --addr or --port, not both");
-    }
 
     let listen_addr = args
         .port
@@ -85,8 +83,7 @@ pub fn parse() -> Result<CliOptions> {
 
     Ok(CliOptions {
         listen_addr,
-        allow_port_fallback: addr_source == Some(ValueSource::DefaultValue)
-            && port_source.is_none(),
+        allow_port_fallback: addr_source == Some(ValueSource::DefaultValue) && args.port.is_none(),
         cwd: env::current_dir().context("read current directory")?,
         revisions: trim_required_values(args.revisions, "revision")?,
         from_rev: trim_optional(args.from_rev),
