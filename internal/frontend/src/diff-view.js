@@ -123,7 +123,7 @@ export function setCurrentPath(path, options = {}) {
     syncTreeSelection(path);
   }
   if (state.tree && file) {
-    state.tree.scrollToPath(file.reviewId, { focus: false, offset: "nearest" });
+    state.tree.scrollToPath(file.name, { focus: false, offset: "nearest" });
   }
   if (scrollDiff) {
     scrollToCurrentFile("smooth");
@@ -141,11 +141,11 @@ export function renderDiffs() {
 
 function codeViewItem(file) {
   return {
-    id: file.reviewId,
+    id: file.name,
     type: "diff",
     fileDiff: file,
     annotations: annotationsForFile(file),
-    collapsed: state.collapsedFiles.has(file.reviewId),
+    collapsed: state.collapsedFiles.has(file.name),
     version: state.renderVersion,
   };
 }
@@ -161,7 +161,7 @@ function refreshFileDiff(path) {
   }
 
   nextRenderVersion();
-  if (!state.codeView.getItem(file.reviewId)) {
+  if (!state.codeView.getItem(file.name)) {
     return false;
   }
 
@@ -205,7 +205,7 @@ function moveCurrentFile(delta) {
     return;
   }
 
-  const currentIndex = state.files.findIndex((file) => file.reviewId === state.currentPath);
+  const currentIndex = state.files.findIndex((file) => file.name === state.currentPath);
   const fallbackIndex = delta > 0 ? -1 : state.files.length;
   const nextIndex = clamp(
     currentIndex === -1 ? fallbackIndex + delta : currentIndex + delta,
@@ -213,8 +213,8 @@ function moveCurrentFile(delta) {
     state.files.length - 1,
   );
   const nextFile = state.files[nextIndex];
-  if (nextFile && nextFile.reviewId !== state.currentPath) {
-    setCurrentPath(nextFile.reviewId, { scrollDiff: true, selectTree: true });
+  if (nextFile && nextFile.name !== state.currentPath) {
+    setCurrentPath(nextFile.name, { scrollDiff: true, selectTree: true });
   }
 }
 
@@ -247,7 +247,7 @@ export function toggleAllFilesCollapsed() {
   if (!state.codeView) {
     return;
   }
-  state.collapsedFiles = allFilesCollapsed() ? new Set() : new Set(state.files.map((file) => file.reviewId));
+  state.collapsedFiles = allFilesCollapsed() ? new Set() : new Set(state.files.map((file) => file.name));
   renderDiffsAtSameScrollPosition();
 }
 
@@ -264,21 +264,21 @@ export function renderDiffsAtSameScrollPosition() {
 }
 
 export function allFilesCollapsed() {
-  return state.files.length > 0 && state.files.every((file) => state.collapsedFiles.has(file.reviewId));
+  return state.files.length > 0 && state.files.every((file) => state.collapsedFiles.has(file.name));
 }
 
 function createFileHeaderPrefix(fileDiff) {
-  if (!fileDiff?.reviewId) {
+  if (!fileDiff?.name) {
     return undefined;
   }
   const wrapper = document.createElement("span");
   wrapper.className = "file-header-prefix";
-  wrapper.append(createFileCollapseButton(fileDiff.reviewId));
+  wrapper.append(createFileCollapseButton(fileDiff.name));
   return wrapper;
 }
 
-function createFileCollapseButton(reviewId) {
-  const collapsed = state.collapsedFiles.has(reviewId);
+function createFileCollapseButton(path) {
+  const collapsed = state.collapsedFiles.has(path);
   const button = document.createElement("button");
   button.type = "button";
   button.className = "icon-button file-collapse-button";
@@ -291,7 +291,7 @@ function createFileCollapseButton(reviewId) {
   button.addEventListener("click", (event) => {
     event.preventDefault();
     event.stopPropagation();
-    toggleFileCollapsed(reviewId);
+    toggleFileCollapsed(path);
   });
   button.addEventListener("pointerdown", (event) => {
     event.stopPropagation();

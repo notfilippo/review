@@ -532,7 +532,7 @@ function openMatch(file, match) {
   const reviewFile = file.in_diff ? state.filesByPath.get(file.path) : undefined;
   if (reviewFile && isHunkLine(reviewFile, match.line)) {
     closePeek();
-    scrollDiffToLine(reviewFile.reviewId, match.line);
+    scrollDiffToLine(reviewFile.name, match.line);
   } else {
     openPeek(file.path, match.line, file.in_diff);
   }
@@ -546,29 +546,29 @@ function isHunkLine(file, lineNumber) {
   ));
 }
 
-async function scrollDiffToLine(reviewId, lineNumber) {
+async function scrollDiffToLine(path, lineNumber) {
   if (!state.codeView) {
     return;
   }
-  if (state.collapsedFiles.has(reviewId)) {
-    state.collapsedFiles.delete(reviewId);
+  if (state.collapsedFiles.has(path)) {
+    state.collapsedFiles.delete(path);
     renderDiffs();
   }
-  setCurrentPath(reviewId, { scrollDiff: false, selectTree: true });
+  setCurrentPath(path, { scrollDiff: false, selectTree: true });
   state.codeView.scrollTo({
     type: "line",
-    id: reviewId,
+    id: path,
     lineNumber,
     side: "additions",
     align: "center",
     behavior: "instant",
   });
   await afterNextPaint();
-  flashLines(renderedAdditionLines(reviewId, lineNumber));
+  flashLines(renderedAdditionLines(path, lineNumber));
 }
 
-function renderedAdditionLines(reviewId, lineNumber) {
-  const item = state.codeView.getRenderedItems?.().find(({ id }) => id === reviewId);
+function renderedAdditionLines(path, lineNumber) {
+  const item = state.codeView.getRenderedItems?.().find(({ id }) => id === path);
   if (!item?.element) {
     return [];
   }

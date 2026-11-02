@@ -19,7 +19,7 @@ function processReviewFile(file, processFile) {
       newFile: file.new_file,
       throwOnError: true,
     });
-    return { ...processed, name: file.path, reviewId: file.path, status: file.status };
+    return { ...processed, name: file.path, status: file.status };
   } catch (error) {
     console.warn("Could not process file", file.path, error);
     return undefined;
@@ -30,8 +30,8 @@ export function orderFilesForTree(files, prepareFileTreeInput) {
   if (files.length < 2) {
     return files;
   }
-  const byPath = new Map(files.map((file) => [file.reviewId, file]));
-  return prepareFileTreeInput(files.map((file) => file.reviewId))
+  const byPath = new Map(files.map((file) => [file.name, file]));
+  return prepareFileTreeInput(files.map((file) => file.name))
     .paths
     .map((path) => byPath.get(path))
     .filter(Boolean);

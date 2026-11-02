@@ -5,11 +5,11 @@ import { els, state } from "./state.js";
 
 export function setupTree(FileTree) {
   state.tree = new FileTree({
-    paths: state.files.map((file) => file.reviewId),
+    paths: state.files.map((file) => file.name),
     flattenEmptyDirectories: true,
     initialExpansion: "open",
     search: true,
-    gitStatus: state.files.map((file) => ({ path: file.reviewId, status: gitStatus(file.status) })),
+    gitStatus: state.files.map((file) => ({ path: file.name, status: gitStatus(file.status) })),
     onSelectionChange(selectedPaths) {
       if (state.syncingTree) {
         return;
@@ -22,11 +22,11 @@ export function setupTree(FileTree) {
       if (!file) {
         return;
       }
-      syncTreeSelection(file.reviewId, selectedPaths);
+      syncTreeSelection(file.name, selectedPaths);
       if (isNarrowViewport()) {
         setTreeCollapsed(true);
       }
-      setCurrentPath(file.reviewId, { scrollDiff: true, selectTree: false });
+      setCurrentPath(file.name, { scrollDiff: true, selectTree: false });
     },
   });
   state.tree.render({ containerWrapper: els.tree });

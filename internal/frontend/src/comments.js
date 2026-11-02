@@ -17,13 +17,13 @@ export function annotationsForFile(file) {
   }));
 }
 
-export function startDraft(reviewId, range) {
-  const file = state.filesByPath.get(reviewId);
+export function startDraft(path, range) {
+  const file = state.filesByPath.get(path);
   if (!range || !file) {
     return;
   }
   const normalized = normalizeRange(range);
-  setCurrentPath(reviewId, { scrollDiff: false, selectTree: true });
+  setCurrentPath(path, { scrollDiff: false, selectTree: true });
   clearActiveComment();
   state.selectedCommentId = "";
   state.draft = {
@@ -219,13 +219,12 @@ export function applyActiveSelection() {
     return;
   }
   queueMicrotask(() => {
-    const reviewId = reviewIdForComment(comment);
-    if (!reviewId) {
+    if (!state.filesByPath.has(comment.path)) {
       state.codeView.clearSelectedLines({ notify: false });
       return;
     }
     state.codeView.setSelectedLines({
-      id: reviewId,
+      id: comment.path,
       range: selectionRange(comment),
     }, { notify: false });
   });
@@ -289,10 +288,6 @@ function annotationSide(comment) {
 
 function sameFileComment(comment, file) {
   return comment.path === file.name;
-}
-
-function reviewIdForComment(comment) {
-  return state.filesByPath.has(comment.path) ? comment.path : "";
 }
 
 function rangeLabel(comment) {
@@ -367,10 +362,10 @@ function activeCommentId() {
 }
 
 function orderedComments() {
-  const fileOrder = new Map(state.files.map((file, index) => [file.reviewId, index]));
+  const fileOrder = new Map(state.files.map((file, index) => [file.name, index]));
   return [...state.comments].sort((left, right) => {
-    const leftFile = fileOrder.get(reviewIdForComment(left)) ?? Number.MAX_SAFE_INTEGER;
-    const rightFile = fileOrder.get(reviewIdForComment(right)) ?? Number.MAX_SAFE_INTEGER;
+    const leftFile = fileOrder.get(left.path) ?? Number.MAX_SAFE_INTEGER;
+    const rightFile = fileOrder.get(right.path) ?? Number.MAX_SAFE_INTEGER;
     if (leftFile !== rightFile) {
       return leftFile - rightFile;
     }
@@ -400,11 +395,7 @@ function moveComment(delta) {
 
 function jumpToComment(id) {
   const comment = findAnnotationComment(id);
-  if (!comment) {
-    return;
-  }
-  const reviewId = reviewIdForComment(comment);
-  if (!reviewId) {
+  if (!comment || !state.filesByPath.has(comment.path)) {
     return;
   }
 
@@ -412,8 +403,8 @@ function jumpToComment(id) {
   state.editingId = "";
   clearHoveredComment();
 
-  if (state.collapsedFiles.has(reviewId)) {
-    state.collapsedFiles.delete(reviewId);
+  if (state.collapsedFiles.has(comment.path)) {
+    state.collapsedFiles.delete(comment.path);
     renderDiffs();
   } else {
     applyActiveSelection();
@@ -423,10 +414,10 @@ function jumpToComment(id) {
   if (!state.codeView) {
     return;
   }
-  setCurrentPath(reviewId, { scrollDiff: false, selectTree: true });
+  setCurrentPath(comment.path, { scrollDiff: false, selectTree: true });
   state.codeView.scrollTo({
     type: "line",
-    id: reviewId,
+    id: comment.path,
     lineNumber: annotationLine(comment),
     side: annotationSide(comment),
     align: "center",

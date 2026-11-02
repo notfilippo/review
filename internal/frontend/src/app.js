@@ -65,7 +65,7 @@ async function init() {
     await afterNextPaint();
     state.files = buildReviewFiles(session, processFile);
     state.files = orderFilesForTree(state.files, prepareFileTreeInput);
-    state.filesByPath = new Map(state.files.map((file) => [file.reviewId, file]));
+    state.filesByPath = new Map(state.files.map((file) => [file.name, file]));
     state.diffStats = computeDiffStats(state.files);
 
     setupTree(FileTree);
@@ -80,7 +80,7 @@ async function init() {
     const firstFile = state.files[0];
     if (firstFile) {
       renderDiffs();
-      setCurrentPath(firstFile.reviewId, { scrollDiff: false, selectTree: true });
+      setCurrentPath(firstFile.name, { scrollDiff: false, selectTree: true });
       els.status.textContent = statusText();
     } else {
       els.status.textContent = "No files";
