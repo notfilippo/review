@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>Review preview</title>
+    <style>
+      * { box-sizing: border-box; }
+      html, body { margin: 0; background: transparent; }
+      body { padding: 32px; color: #dadce0; font: 13px system-ui, sans-serif; }
+      .browser {
+        overflow: hidden;
+        border: 1px solid #505050;
+        border-radius: 14px;
+        background: #242424;
+        box-shadow: 0 12px 26px #0006;
+      }
+      .tabs { display: flex; align-items: center; height: 40px; gap: 16px; padding: 0 14px; }
+      .window-controls { display: flex; gap: 8px; padding-right: 8px; }
+      .window-controls i { width: 12px; height: 12px; border-radius: 50%; background: #ff5f57; }
+      .window-controls i:nth-child(2) { background: #febc2e; }
+      .window-controls i:nth-child(3) { background: #28c840; }
+      .tab {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        align-self: end;
+        width: 220px;
+        height: 34px;
+        padding: 0 14px;
+        border-radius: 10px 10px 0 0;
+        background: #353535;
+      }
+      .tab-close { margin-left: auto; color: #b7b7b7; }
+      .toolbar { display: flex; align-items: center; height: 44px; gap: 18px; padding: 0 14px; background: #353535; }
+      .toolbar svg { width: 16px; height: 16px; fill: none; stroke: #a9abad; stroke-width: 1.5; }
+      .address { display: flex; align-items: center; flex: 1; gap: 10px; height: 30px; padding: 0 12px; border-radius: 16px; background: #242424; }
+      iframe { display: block; width: 100%; height: 900px; border: 0; background: #101010; }
+    </style>
+  </head>
+  <body>
+    <main class="browser">
+      <div class="tabs" aria-hidden="true">
+        <div class="window-controls"><i></i><i></i><i></i></div>
+        <div class="tab"><span>▣</span><span>Review</span><span class="tab-close">×</span></div>
+        <span>+</span>
+      </div>
+      <div class="toolbar" aria-hidden="true">
+        <svg viewBox="0 0 16 16"><path d="m9 3-5 5 5 5M4 8h10"/></svg>
+        <svg viewBox="0 0 16 16"><path d="m7 3 5 5-5 5M2 8h10"/></svg>
+        <svg viewBox="0 0 16 16"><path d="M13 5a5 5 0 1 0 0 6M13 1v4H9"/></svg>
+        <div class="address"><span>ⓘ</span><span id="address"></span></div>
+        <span>⋮</span>
+      </div>
+      <iframe title="Review"></iframe>
+    </main>
+  </body>
+</html>

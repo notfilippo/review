@@ -157,7 +157,7 @@ Bug reports and pull requests are welcome. For bugs, include the command you ran
 
 ### Regenerate the screenshot
 
-The screenshot tool serves the real frontend with a fixed demo review, then captures it with Playwright. It does not use your current repository changes or comments, and it does not need a Rust build.
+The screenshot tool captures the real frontend at 3× resolution inside a rendered browser frame. By default it serves a fixed demo review and does not need a Rust build.
 
 With Node.js 22 or newer, run these commands from the repository root:
 
@@ -167,7 +167,13 @@ npm exec --prefix tools/screenshot -- playwright install chromium
 npm run --prefix tools/screenshot capture
 ```
 
-This updates [docs/demo.png](docs/demo.png). Internet access is needed to load the frontend libraries. On Linux, Playwright may also need system packages; see its [browser installation guide](https://playwright.dev/docs/browsers#install-system-dependencies).
+To capture a running review, first save the comments you want to show. Then pass its URL and optionally the file to show:
+
+```sh
+npm run --prefix tools/screenshot capture -- 'http://127.0.0.1:7527/?token=YOUR_TOKEN' src/server.rs
+```
+
+The tool saves a preview in your system's temporary directory and prints its path. Inspect the preview before replacing [docs/demo.png](docs/demo.png). The frame omits the URL's query string. Internet access is needed to load the frontend libraries. On Linux, Playwright may also need system packages; see its [browser installation guide](https://playwright.dev/docs/browsers#install-system-dependencies).
 
 ## License
 
